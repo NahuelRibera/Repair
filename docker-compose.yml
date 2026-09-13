@@ -1,0 +1,56 @@
+name: repair-v2
+
+# Local development stack only. Never run against the owner's existing
+# PostgreSQL instance or the original repair_db database — this project
+# always uses its own containers, own named volumes, and non-default host
+# ports so it cannot collide with anything already running locally.
+#
+# Ports (host:container):
+#   5544 -> primary application database (pgvector-enabled)
+#   5545 -> isolated legacy-dump database, used only to inspect
+#           data/raw/legacy-database/repair_db_legacy.sql; not part of the
+#           application's runtime path.
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: repair-v2-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: repair_v2
+      POSTGRES_USER: repair_v2
+      POSTGRES_PASSWORD: repair_v2_local_only
+    ports:
+      - "5544:5432"
+    volumes:
+      - repair_v2_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repair_v2 -d repair_v2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  legacy-db:
+    image: postgres:17
+    container_name: repair-v2-legacy-db
+    restart: "no"
+    profiles: ["legacy-inspection"]
+    environment:
+      POSTGRES_DB: repair_db_legacy
+      POSTGRES_USER: repair_v2
+      POSTGRES_PASSWORD: repair_v2_local_only
+    ports:
+      - "5545:5432"
+    volumes:
+      - repair_v2_legacy_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U repair_v2 -d repair_db_legacy"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  repair_v2_pgdata:
+    name: repair_v2_pgdata
+  repair_v2_legacy_pgdata:
+    name: repair_v2_legacy_pgdata

@@ -1,7 +1,7 @@
-# Datos originales y backups
+# Original private data and backups (see docs/planning/data-findings.md)
 /data/raw/
 
-# Credenciales y configuración local
+# Credentials and local configuration
 .env
 .env.*
 !.env.example
@@ -14,6 +14,10 @@ out/
 dist/
 coverage/
 *.tsbuildinfo
+/apps/web/test-results/
+/apps/web/playwright-report/
+/apps/web/blob-report/
+/apps/web/playwright/.cache/
 
 # Java
 target/
@@ -27,8 +31,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+*.egg-info/
 
-# Archivos locales
+# Local files
 .DS_Store
 .idea/
 *.log
+/.logs/

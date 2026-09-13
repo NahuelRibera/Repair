@@ -1,0 +1,25 @@
+[project]
+name = "repair-pipelines"
+version = "0.1.0"
+description = "Reproducible ingestion and knowledge-corpus embedding CLI for Repair V2."
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.2,<3",
+    "psycopg[binary]>=3.2,<4",
+    "python-dotenv>=1.0,<2",
+    "openai>=1.50,<2",
+    "python-frontmatter>=1.1,<2",
+    "tenacity>=9.0,<10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0,<9",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ingest*", "embeddings*"]
