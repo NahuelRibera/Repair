@@ -1,44 +1,45 @@
 "use client";
 
-import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { vehicleTitle } from "@/lib/types";
-import type { ChatTurnResult, EvidenceCard, Message, RagRunDebug, SessionDetail } from "@/lib/types";
-import { AnswerCard } from "@/components/AnswerCard";
+import { bikeTitle } from "@/lib/types";
+import type { ActionTaken, MotoChatTurnResult, MotoEvidenceCard, MotoMessage, MotoRagRunDebug, MotoSessionDetail } from "@/lib/types";
+import { MotoAnswerCard } from "@/components/MotoAnswerCard";
 import { Composer } from "@/components/Composer";
-import { EvidenceDrawer } from "@/components/EvidenceDrawer";
+import { MotoEvidenceDrawer } from "@/components/MotoEvidenceDrawer";
 
 interface TurnExtras {
-  evidence: EvidenceCard[];
-  debug: RagRunDebug;
+  evidence: MotoEvidenceCard[];
+  actionsTaken: ActionTaken[];
+  debug: MotoRagRunDebug;
 }
+
+const EXAMPLE_QUESTIONS = [
+  "When is my next oil change?",
+  "How often should I lubricate the chain?",
+  "What tire pressure should I use?",
+  "What maintenance is due soon?",
+  "My bike is struggling to start",
+];
 
 export default function ConversationPage() {
   const params = useParams<{ sessionId: string }>();
-  const searchParams = useSearchParams();
   const sessionId = Number(params.sessionId);
-  const prefill = searchParams.get("prefill") ?? undefined;
 
-  // Keying by sessionId forces a full remount (and therefore fresh state)
-  // whenever the user switches conversations, instead of an effect that
-  // manually resets half a dozen state variables and risks leaving a
-  // stale one behind.
-  return <ConversationView key={sessionId} sessionId={sessionId} prefill={prefill} />;
+  return <ConversationView key={sessionId} sessionId={sessionId} />;
 }
 
-function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?: string }) {
-  const [detail, setDetail] = useState<SessionDetail | null>(null);
+function ConversationView({ sessionId }: { sessionId: number }) {
+  const [detail, setDetail] = useState<MotoSessionDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [turnExtras, setTurnExtras] = useState<Record<number, TurnExtras>>({});
   const [drawerFor, setDrawerFor] = useState<number | null>(null);
-  const autoSentRef = useRef(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // Starts true so the first render of an existing conversation lands at
-  // the bottom (the most recent message), matching normal chat UX.
   const isNearBottomRef = useRef(true);
   const requestGuard = useRef(0);
 
@@ -54,7 +55,7 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
   useEffect(() => {
     const id = ++requestGuard.current;
     api
-      .get<SessionDetail>(`/api/sessions/${sessionId}`)
+      .get<MotoSessionDetail>(`/api/moto-sessions/${sessionId}`)
       .then((d) => {
         if (requestGuard.current === id) setDetail(d);
       })
@@ -66,17 +67,6 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
   }, [sessionId]);
 
   useEffect(() => {
-    // Follows new content (an assistant reply arriving, the "Thinking…"
-    // indicator appearing) only if the reader was already near the
-    // bottom — reading older messages must never get yanked back down.
-    // Sending a message forces isNearBottomRef true beforehand (see
-    // sendMessage), so the user's own outgoing message always scrolls
-    // into view regardless of prior scroll position.
-    //
-    // Uses "auto" (instant), not "smooth": smooth scrollIntoView proved
-    // unreliable (silently a no-op in some environments, including this
-    // project's own browser-automation tooling) — a chat app scrolling
-    // reliably every time matters more than an animation.
     if (isNearBottomRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "auto" });
     }
@@ -87,11 +77,7 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
     const currentSessionId = sessionId;
     setSending(true);
     setSendError(null);
-    // Sending your own message always scrolls it into view, regardless of
-    // where you were reading — this is the one case that overrides the
-    // "only follow if already near the bottom" rule below.
     isNearBottomRef.current = true;
-    // Optimistic user bubble.
     setDetail((prev) =>
       prev
         ? {
@@ -104,10 +90,13 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
         : prev
     );
     try {
-      const result = await api.post<ChatTurnResult>(`/api/sessions/${currentSessionId}/messages`, { content: text });
-      if (currentSessionId !== sessionId) return; // user navigated away before this resolved
-      setTurnExtras((prev) => ({ ...prev, [result.messageId]: { evidence: result.evidence, debug: result.debug } }));
-      const fresh = await api.get<SessionDetail>(`/api/sessions/${currentSessionId}`);
+      const result = await api.post<MotoChatTurnResult>(`/api/moto-sessions/${currentSessionId}/messages`, { content: text });
+      if (currentSessionId !== sessionId) return;
+      setTurnExtras((prev) => ({
+        ...prev,
+        [result.messageId]: { evidence: result.evidence, actionsTaken: result.actionsTaken, debug: result.debug },
+      }));
+      const fresh = await api.get<MotoSessionDetail>(`/api/moto-sessions/${currentSessionId}`);
       if (currentSessionId === sessionId) setDetail(fresh);
     } catch (e) {
       if (currentSessionId === sessionId) {
@@ -117,14 +106,6 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
       if (currentSessionId === sessionId) setSending(false);
     }
   }
-
-  useEffect(() => {
-    if (prefill && detail && !autoSentRef.current && detail.messages.length === 0) {
-      autoSentRef.current = true;
-      sendMessage(prefill);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefill, detail]);
 
   if (loadError) {
     return (
@@ -149,16 +130,19 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <header className="border-b border-border px-4 sm:px-6 py-3 flex items-center gap-3 shrink-0">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy text-white text-xs font-semibold shrink-0">
-          {detail.session.manufacturerName.slice(0, 2).toUpperCase()}
+      <header className="border-b border-border px-4 sm:px-6 py-3 flex items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-navy text-white text-xs font-semibold shrink-0">
+            {detail.session.manufacturerName.slice(0, 2).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold truncate">{bikeTitle(detail.session)}</p>
+            <p className="text-xs text-muted truncate">{detail.session.year}</p>
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold truncate">
-            {vehicleTitle(detail.session.manufacturerName, detail.session.modelName)}
-          </p>
-          <p className="text-xs text-muted truncate">{detail.session.variantName}</p>
-        </div>
+        <Link href="/chat" className="text-sm font-medium text-accent hover:underline shrink-0">
+          Change bike
+        </Link>
       </header>
 
       <div
@@ -168,9 +152,21 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
       >
         <div className="mx-auto max-w-3xl space-y-6">
           {detail.messages.length === 0 && !sending && (
-            <p className="text-sm text-muted text-center py-10">
-              Describe the symptom you&apos;re seeing and I&apos;ll help narrow it down.
-            </p>
+            <div className="py-8 text-center">
+              <p className="text-sm text-muted mb-4">What do you want to know about your bike?</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {EXAMPLE_QUESTIONS.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => sendMessage(q)}
+                    className="rounded-full border border-border bg-panel px-3.5 py-1.5 text-sm hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
           {detail.messages.map((message) => (
             <MessageBubble
@@ -192,16 +188,14 @@ function ConversationView({ sessionId, prefill }: { sessionId: number; prefill?:
               <span>{sendError}</span>
             </div>
           )}
-          {/* A genuinely zero-height sentinel makes scrollIntoView a no-op
-              in some browsers — h-px gives it real, if tiny, layout. */}
           <div ref={bottomRef} className="h-px" />
         </div>
       </div>
 
-      <Composer disabled={sending} initialValue={prefill} onSend={sendMessage} />
+      <Composer disabled={sending} onSend={sendMessage} />
 
       {drawerFor != null && (
-        <EvidenceDrawer
+        <MotoEvidenceDrawer
           evidence={activeExtras?.evidence ?? []}
           debug={activeExtras?.debug ?? null}
           onClose={() => setDrawerFor(null)}
@@ -217,7 +211,7 @@ function MessageBubble({
   onOpenEvidence,
   onFollowUpClick,
 }: {
-  message: Message;
+  message: MotoMessage;
   extras?: TurnExtras;
   onOpenEvidence: () => void;
   onFollowUpClick: (q: string) => void;
@@ -246,9 +240,10 @@ function MessageBubble({
       </div>
       <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm border border-border bg-panel px-4 py-3.5">
         {parsed ? (
-          <AnswerCard
+          <MotoAnswerCard
             answer={parsed}
             evidence={extras?.evidence ?? []}
+            actionsTaken={extras?.actionsTaken ?? []}
             onOpenEvidence={onOpenEvidence}
             onFollowUpClick={onFollowUpClick}
           />

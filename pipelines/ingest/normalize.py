@@ -21,6 +21,19 @@ def slugify(value: str) -> str:
     return slug or "unnamed"
 
 
+def normalize_alias(value: str) -> str:
+    """Case/accent/hyphen/whitespace-insensitive comparison key for model
+    aliases (see docs/repair-v2-architecture.md section 1) — e.g. "Ténéré
+    700", "Tenere 700" and "tenere-700" all normalize to "tenere 700".
+    Deliberately keeps word boundaries (unlike slugify's hyphen-joining)
+    so it stays a token-for-token comparison rather than a lossy id.
+    """
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    collapsed = re.sub(r"[^a-zA-Z0-9]+", " ", ascii_only).strip().lower()
+    return collapsed
+
+
 def is_blank(value: str | None) -> bool:
     return value is None or value.strip() == "" or value.strip().upper() == "NULL"
 

@@ -42,7 +42,7 @@ export function Composer({
                 submit();
               }
             }}
-            placeholder="Describe the symptom in detail…"
+            placeholder="Ask about maintenance, or describe what's happening…"
             rows={1}
             className="flex-1 resize-none bg-transparent py-1.5 text-sm outline-none max-h-40 disabled:opacity-50"
           />

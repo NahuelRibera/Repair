@@ -1,26 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { usePathname, useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { vehicleTitle } from "@/lib/types";
-import type { SessionSummary } from "@/lib/types";
+import { bikeTitle } from "@/lib/types";
+import type { MotoSessionSummary } from "@/lib/types";
 
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useParams<{ sessionId?: string }>();
   const activeId = params?.sessionId ? Number(params.sessionId) : null;
 
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessions, setSessions] = useState<MotoSessionSummary[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
-  async function refresh(query = "") {
+  async function refresh() {
     setLoading(true);
     try {
-      const results = await api.get<SessionSummary[]>(`/api/sessions?search=${encodeURIComponent(query)}`);
+      const results = await api.get<MotoSessionSummary[]>("/api/moto-sessions");
       setSessions(results);
     } finally {
       setLoading(false);
@@ -28,21 +29,20 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
   }
 
   useEffect(() => {
-    // Refetch the session list whenever the active conversation changes
-    // (so a brand-new session shows up) or the search text changes
-    // (debounced). `refresh` sets loading/sessions state from its own
-    // guarded async body — a standard fetch-on-dependency-change effect.
-    const timer = setTimeout(() => refresh(search), 200);
-    return () => clearTimeout(timer);
-  }, [search, activeId]);
+    refresh();
+  }, [activeId]);
+
+  const filtered = search.trim()
+    ? sessions.filter((s) => `${s.title ?? ""} ${bikeTitle(s)}`.toLowerCase().includes(search.trim().toLowerCase()))
+    : sessions;
 
   async function confirmDelete(id: number) {
-    await api.del(`/api/sessions/${id}`);
+    await api.del(`/api/moto-sessions/${id}`);
     setPendingDeleteId(null);
     if (activeId === id) {
       router.push("/chat");
     }
-    refresh(search);
+    refresh();
   }
 
   return (
@@ -69,9 +69,17 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
           </Link>
           <Link
             href="/chat"
-            className="flex items-center justify-center gap-2 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+            className="flex items-center justify-center gap-2 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors mb-2"
           >
             + New chat
+          </Link>
+          <Link
+            href="/garage"
+            className={`flex items-center justify-center gap-2 w-full rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors ${
+              pathname?.startsWith("/garage") ? "bg-white/15 text-white" : "bg-white/5 text-white/80 hover:bg-white/10"
+            }`}
+          >
+            My Garage
           </Link>
         </div>
 
@@ -88,10 +96,10 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
           {loading && sessions.length === 0 && (
             <p className="px-3 py-2 text-sm text-white/40">Loading…</p>
           )}
-          {!loading && sessions.length === 0 && (
+          {!loading && filtered.length === 0 && (
             <p className="px-3 py-2 text-sm text-white/40">No conversations yet.</p>
           )}
-          {sessions.map((s) => (
+          {filtered.map((s) => (
             <div key={s.id} className="group relative">
               <Link
                 href={`/chat/${s.id}`}
@@ -100,8 +108,8 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
                   activeId === s.id ? "bg-white/10" : "hover:bg-white/5"
                 }`}
               >
-                <p className="text-sm text-white truncate">{s.title ?? vehicleTitle(s.manufacturerName, s.modelName)}</p>
-                <p className="text-xs text-white/40 truncate">{s.variantName}</p>
+                <p className="text-sm text-white truncate">{s.title ?? bikeTitle(s)}</p>
+                <p className="text-xs text-white/40 truncate">{s.year}</p>
               </Link>
               <button
                 type="button"

@@ -1,8 +1,73 @@
 # Implementation status
 
-Last updated: 2026-09-13 (bug-fix session: chat scroll layout, catalogue
-pagination, demo-vehicle identification). Working log, not a changelog —
-describes what is actually verified right now.
+Last updated: 2026-09-14 (Repair V2 motorcycle pivot). Working log, not a
+changelog — describes what is actually verified right now. Everything
+below the "Repair V2 motorcycle pivot" section is the car prototype's own
+history, preserved as-is (that prototype is a preserved historical
+checkpoint, not deleted — see CLAUDE.md and
+`docs/repair-v2-current-state.md`).
+
+## Repair V2 motorcycle pivot (2026-09-14)
+
+Full car → motorcycle pivot on branch `repair-v2-motorcycles`. See
+`docs/repair-v2-current-state.md` (audit), `docs/repair-v2-architecture.md`
+(design), `docs/knowledge-ingestion.md`, `docs/maintenance-tracking.md`,
+and `docs/retrieval-evaluation.md` for full detail; this is the summary.
+
+**Built and verified, live, this session:**
+
+- Flyway `V6`/`V7`: motorcycle catalog (manufacturers/models/aliases/
+  knowledge documents/chunks/facts) and garage/maintenance (garage
+  vehicles/maintenance events/preferences/moto chat sessions+RAG debug),
+  applied cleanly against the real dev database alongside the untouched
+  car schema (`V1`–`V5`).
+- `pipelines/embeddings/ingest_motorcycle_knowledge.py`: real ingestion
+  of the 29 real Yamaha knowledge files → 895 chunks, 588 deterministic
+  facts, idempotent (re-run reports 29/29 unchanged, 0 API calls),
+  measured cost **$0.001351** for the full corpus.
+- Dynamic catalog API (`/api/motorcycles/*`), garage API
+  (`/api/garage/vehicles/*`), motorcycle chat API (`/api/moto-sessions/*`),
+  all ownership-scoped to the existing `VisitorContext` cookie.
+- Hard-filtered hybrid RAG (`MotoRetrievalService`) — contamination tests
+  pass against the real ingested corpus (MT-07 vs MT-09, MT-09 vs MT-09
+  SP, year-range boundaries), both as Testcontainers integration tests
+  and live through a real browser session (Evidence & Debug drawer
+  showed all 6 retrieved chunks under the exact selected model/year,
+  every time, across multiple bikes/questions).
+- Controlled chat actions (maintenance event / odometer update /
+  preference) — live-verified: a real chat turn ("I actually just
+  lubricated the chain today at 15000 km") produced both a persisted
+  `CHAIN_LUBE` maintenance event and an odometer update; a hypothetical
+  question ("what if I were at 30,000 km?") produced **zero** writes.
+- Maintenance dashboard status calculation
+  (`MaintenanceStatusService`) — live-verified against the spec's own
+  worked example: odometer 23,500 km, last oil change 19,000 km, 6,000 km
+  interval → dashboard showed `Engine oil: OK — Last: 19,000 km, 1,500 km
+  remaining`, with every other service type honestly `Unknown`.
+- Full frontend rebuild for the motorcycle product: landing page, bike
+  picker (manufacturer → model → year, fully dynamic), chat UX with
+  bike-aware header + "Change bike", My Garage list, per-bike maintenance
+  dashboard, evidence/debug drawer — all live-tested in a real browser
+  end to end (see `docs/retrieval-evaluation.md` for the full walkthrough).
+- Tests: 48/48 Python (`pytest`), full Java suite (`./mvnw test`,
+  including the pre-existing car suite — no regression), `next build` +
+  `tsc --noEmit` clean.
+
+**Known limitations** (see the final engineering report in this
+session's conversation for the complete list): no automated Playwright
+test was added for the new motorcycle frontend flow (verified manually
+instead); the deterministic facts layer covers a meaningful but partial
+subset of possible fact types; controlled AI actions are schema-level
+proposals validated post-generation rather than a full mid-generation
+tool-calling loop (a deliberate, documented simplification — see
+`docs/repair-v2-architecture.md` section 5); mobile responsiveness was
+not separately re-verified for the new pages (inherited the same
+responsive classes as the car UI, not independently tested at narrow
+viewport this session).
+
+---
+
+## Car prototype history (preserved, not modified this session)
 
 ## This session: three bug fixes (chat scroll, catalogue pagination, demo vehicle)
 

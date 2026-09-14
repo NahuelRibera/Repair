@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Repair — AI-powered automotive diagnosis",
+  title: "Repair — your bike, properly looked after",
   description:
-    "Describe a car symptom and get evidence-backed hypotheses, safe checks, and cited sources. A portfolio demo.",
+    "Maintenance guidance, service tracking and everyday troubleshooting built around the motorcycle you actually ride. A portfolio demo.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

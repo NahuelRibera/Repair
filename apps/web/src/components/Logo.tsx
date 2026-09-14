@@ -18,7 +18,7 @@ export function Logo({ dark = false }: { dark?: boolean }) {
       </span>
       <span className="leading-tight">
         <span className={`block font-semibold text-[15px] ${dark ? "text-white" : "text-navy"}`}>Repair</span>
-        <span className={`block text-[11px] ${dark ? "text-white/60" : "text-muted"}`}>Your car, understood.</span>
+        <span className={`block text-[11px] ${dark ? "text-white/60" : "text-muted"}`}>Your bike, understood.</span>
       </span>
     </Link>
   );
