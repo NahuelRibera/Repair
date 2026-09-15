@@ -37,7 +37,10 @@ export default function NewChatPage() {
     setStarting(true);
     setError(null);
     try {
-      const vehicle = await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year });
+      // Normal "choose your bike" flow — reuse an existing garage vehicle
+      // for this exact manufacturer/model/year if the rider already has
+      // one, rather than creating a duplicate physical motorcycle.
+      const vehicle = await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year, allowDuplicate: false });
       await startWithGarageVehicle(vehicle.id);
     } catch {
       setError("That bike isn't in the knowledge base yet, or something went wrong. Please try another year.");

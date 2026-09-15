@@ -57,6 +57,8 @@ export function MotoEvidenceDrawer({
             </section>
           )}
 
+          {debug?.actionsTakenJson && <ActionsSection actionsTakenJson={debug.actionsTakenJson} />}
+
           <section>
             <h3 className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">
               Retrieved ({evidence.length})
@@ -97,6 +99,54 @@ export function MotoEvidenceDrawer({
         </div>
       </div>
     </div>
+  );
+}
+
+interface ProposalAuditEntry {
+  proposalType: string;
+  intent: string | null;
+  verdict: "executed" | "rejected";
+  reason: string | null;
+}
+
+/** Full proposed-action audit trail for this turn — every action the
+ * model proposed, whether it was executed or rejected, and why. This is
+ * the internal-enum-friendly place for that detail (see QA pass section
+ * 26); the normal chat bubble only ever shows the executed subset as a
+ * plain confirmation chip. */
+function ActionsSection({ actionsTakenJson }: { actionsTakenJson: string }) {
+  let entries: ProposalAuditEntry[] = [];
+  try {
+    entries = JSON.parse(actionsTakenJson);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+
+  return (
+    <section>
+      <h3 className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">
+        Actions proposed ({entries.length})
+      </h3>
+      <div className="space-y-2">
+        {entries.map((entry, i) => (
+          <div key={i} className="rounded-lg border border-border p-2.5 text-xs">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="font-medium">{entry.proposalType}</span>
+              <span
+                className={`rounded px-1.5 py-0.5 font-medium ${
+                  entry.verdict === "executed" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {entry.verdict}
+              </span>
+            </div>
+            {entry.intent && <p className="text-muted">intent: {entry.intent}</p>}
+            {entry.reason && <p className="text-muted">reason: {entry.reason}</p>}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

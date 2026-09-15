@@ -15,7 +15,10 @@ export function LandingPicker() {
     setStarting(true);
     setError(null);
     try {
-      const vehicle = await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year });
+      // Normal "choose your bike" flow — reuse an existing garage vehicle
+      // for this exact manufacturer/model/year if the rider already has
+      // one, rather than creating a duplicate physical motorcycle.
+      const vehicle = await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year, allowDuplicate: false });
       const detail = await api.post<MotoSessionDetail>("/api/moto-sessions", { garageVehicleId: vehicle.id });
       router.push(`/chat/${detail.session.id}`);
     } catch {

@@ -21,17 +21,26 @@ import org.springframework.stereotype.Service;
 public class MaintenanceStatusService {
 
     /** Distance-based interval fact per service type, or null if this
-     * service type has no reliably-extracted distance interval. */
+     * service type has no reliably-extracted distance interval. Extend
+     * this map (and MONTH_INTERVAL_FACT below) as ingestion learns to
+     * extract more fact types — never hardcode a value here, only a
+     * fact_type key to look up. */
     private static final Map<String, String> KM_INTERVAL_FACT = Map.of(
             "ENGINE_OIL_CHANGE", "ENGINE_OIL_INTERVAL_KM",
-            "VALVE_CLEARANCE_CHECK", "VALVE_CLEARANCE_INTERVAL_KM"
+            "VALVE_CLEARANCE_CHECK", "VALVE_CLEARANCE_INTERVAL_KM",
+            "OIL_FILTER_CHANGE", "OIL_FILTER_INTERVAL_KM",
+            "AIR_FILTER_CHANGE", "AIR_FILTER_INTERVAL_KM",
+            "CHAIN_LUBE", "CHAIN_LUBE_INTERVAL_KM",
+            "SPARK_PLUG_CHANGE", "SPARK_PLUG_REPLACE_INTERVAL_KM"
     );
 
     /** Time-based interval fact (in months) per service type, or null. */
     private static final Map<String, String> MONTH_INTERVAL_FACT = Map.of(
             "ENGINE_OIL_CHANGE", "ENGINE_OIL_INTERVAL_MONTHS",
             "COOLANT_CHANGE", "COOLANT_CHANGE_INTERVAL_MONTHS",
-            "BRAKE_FLUID_CHANGE", "BRAKE_FLUID_INTERVAL_MONTHS"
+            "BRAKE_FLUID_CHANGE", "BRAKE_FLUID_INTERVAL_MONTHS",
+            "OIL_FILTER_CHANGE", "OIL_FILTER_INTERVAL_MONTHS",
+            "SPARK_PLUG_CHANGE", "SPARK_PLUG_REPLACE_INTERVAL_MONTHS"
     );
 
     /** Below this fraction of the interval remaining, a service is "due
@@ -41,7 +50,15 @@ public class MaintenanceStatusService {
      * complicated scoring"). */
     private static final double DUE_SOON_FRACTION = 0.2;
 
-    public enum Status { UNKNOWN, OK, DUE_SOON, DUE, OVERDUE }
+    /**
+     * UNKNOWN and INTERVAL_KNOWN_NO_HISTORY are deliberately distinct —
+     * see docs/maintenance-tracking.md "interval known vs. history
+     * unknown". UNKNOWN means "we have no verified interval for this
+     * service on this bike at all"; INTERVAL_KNOWN_NO_HISTORY means "we
+     * know the interval, we just don't have a recorded previous service
+     * to measure from" — the dashboard renders these very differently.
+     */
+    public enum Status { UNKNOWN, INTERVAL_KNOWN_NO_HISTORY, OK, DUE_SOON, DUE, OVERDUE }
 
     public record StatusCard(
             String serviceType, Status status, Double lastOdometerKm, LocalDate lastPerformedAt,
@@ -79,16 +96,31 @@ public class MaintenanceStatusService {
                     "No verified interval for this service on this bike");
         }
 
+        if (lastEvent == null) {
+            // We know the interval but have no recorded previous service to
+            // measure from — this is NOT the same as "unknown interval"
+            // (see the Status enum javadoc). Where the current odometer is
+            // known and hasn't yet reached one full interval, show a
+            // best-effort "next scheduled at the interval mark" figure —
+            // clearly caveated as assuming no prior service, never as a
+            // confirmed due date. Never claim overdue from this assumption
+            // alone; an unverified guess of "overdue" is worse than an
+            // honest "we don't know."
+            Double remainingKm = null;
+            if (intervalKm != null && vehicle.currentOdometerKm() != null && vehicle.currentOdometerKm() < intervalKm) {
+                remainingKm = intervalKm - vehicle.currentOdometerKm();
+            }
+            return new StatusCard(serviceType, Status.INTERVAL_KNOWN_NO_HISTORY, null, null,
+                    intervalKm, remainingKm, intervalMonths, null, "No previous service recorded");
+        }
+
         Dimension byDistance = evaluateDistance(vehicle, lastEvent, intervalKm);
         Dimension byTime = evaluateTime(lastEvent, intervalMonths);
-
         Dimension worse = worseOf(byDistance, byTime);
-        String note = lastEvent == null ? "Not recorded" : null;
 
         return new StatusCard(
-                serviceType, worse.status, lastEvent == null ? null : lastEvent.odometerKm(),
-                lastEvent == null ? null : lastEvent.performedAt(),
-                intervalKm, byDistance.remaining, intervalMonths, byTime.remaining, note
+                serviceType, worse.status, lastEvent.odometerKm(), lastEvent.performedAt(),
+                intervalKm, byDistance.remaining, intervalMonths, byTime.remaining, null
         );
     }
 

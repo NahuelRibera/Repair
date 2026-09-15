@@ -135,6 +135,17 @@ def extract_facts(body: str) -> list[Fact]:
         ("Wheels, tires and brakes", (r"Front cold pressure:\s*([\d.]+)\s*kPa",), "FRONT_TIRE_PRESSURE_KPA", "kPa", False),
         ("Wheels, tires and brakes", (r"Rear cold pressure:\s*([\d.]+)\s*kPa",), "REAR_TIRE_PRESSURE_KPA", "kPa", False),
         ("Electrical system", (r"Battery:\s*(.+)",), "BATTERY_MODEL", None, True),
+        # Numeric counterpart of CHAIN_LUBE_INTERVAL (above) for the
+        # maintenance dashboard, which needs a plain number to compute a
+        # remaining-distance figure — the text fact stays for chat prose.
+        (
+            "Drive chain",
+            (r"\*\*Cleaning and lubrication:\*\*\s*every\s*([\d,]+)\s*km", r"\*\*Cleaning and lubrication interval:\*\*\s*[Ee]very\s*([\d,]+)\s*km"),
+            "CHAIN_LUBE_INTERVAL_KM", "km", False,
+        ),
+        # Wording varies between "every X km" and a bare "X km" (no "every") —
+        # accept both rather than silently missing half the corpus.
+        ("Air filter", (r"\*\*Replacement interval:\*\*\s*(?:every\s*)?([\d,]+)\s*km",), "AIR_FILTER_INTERVAL_KM", "km", False),
     ]
     for heading, patterns, fact_type, unit, as_text in extractors:
         fact = _extract_regex_fact(body, heading, patterns, fact_type, unit, as_text=as_text)
@@ -142,6 +153,77 @@ def extract_facts(body: str) -> list[Fact]:
             facts.append(fact)
 
     facts.extend(_extract_year_intervals_as_months(body))
+    facts.extend(_extract_spark_plug_interval(body))
+    facts.extend(_extract_oil_filter_interval(body))
+    return facts
+
+
+def _extract_spark_plug_interval(body: str) -> list[Fact]:
+    """Two real phrasings appear in the corpus for the spark-plug
+    replacement interval:
+
+    - a simple one-line form: "Replace every 19,000 km or 18 months"
+      (MT-09/MT-09 SP) — both km and months are directly stated.
+    - a two-point form: "Replace at 13,000 and 25,000 km" plus a separate
+      "13,000 km / 12 month schedule" repeat-cycle note (MT-07/Ténéré
+      700) — the km interval is the real, stated difference between the
+      two replace points (25,000 - 13,000 = 12,000 km); no months figure
+      is cleanly derivable from that wording, so only km is emitted.
+
+    Both derivations use only numbers actually present in the source
+    text — never an invented or interpolated value.
+    """
+    section = _section(body, "Spark plugs")
+    if section is None:
+        return []
+
+    simple = re.search(r"Replace every\s*([\d,]+)\s*km\s*or\s*(\d+)\s*months?", section, re.IGNORECASE)
+    if simple:
+        return [
+            Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", _num(simple.group(1)), None, "km", simple.group(0).strip()),
+            Fact("SPARK_PLUG_REPLACE_INTERVAL_MONTHS", float(simple.group(2)), None, "months", simple.group(0).strip()),
+        ]
+
+    two_point = re.search(r"Replace at\s*([\d,]+)\s*and\s*([\d,]+)\s*km", section, re.IGNORECASE)
+    if two_point:
+        first_km = _num(two_point.group(1))
+        second_km = _num(two_point.group(2))
+        if second_km > first_km:
+            return [Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", second_km - first_km, None, "km", two_point.group(0).strip())]
+
+    return []
+
+
+_OIL_FILTER_POINTS_RE = re.compile(
+    r"eplacement points:\*\*\s*\n"
+    r"-\s*[\d,]+\s*km or \d+\s*months?\.\s*\n"
+    r"-\s*([\d,]+)\s*km or (\d+)\s*months?\.\s*\n"
+    r"-\s*([\d,]+)\s*km or (\d+)\s*months?\.",
+    re.IGNORECASE,
+)
+
+
+def _extract_oil_filter_interval(body: str) -> list[Fact]:
+    """The oil-filter section's heading text varies ("Oil filter and
+    drain bolt" vs. "Oil filter") across the corpus, so this searches the
+    whole document body for the distinctive "replacement points:" bullet
+    list rather than a fixed heading. The list always has the same shape:
+    a first-service point, then two steady-state points whose difference
+    is the real, stated repeating interval (e.g. 25,000 - 13,000 = 12,000
+    km; 24 - 12 = 12 months) — derived from numbers actually in the
+    source, never invented.
+    """
+    match = _OIL_FILTER_POINTS_RE.search(body)
+    if not match:
+        return []
+    second_km, second_months, third_km, third_months = (
+        _num(match.group(1)), int(match.group(2)), _num(match.group(3)), int(match.group(4))
+    )
+    facts: list[Fact] = []
+    if third_km > second_km:
+        facts.append(Fact("OIL_FILTER_INTERVAL_KM", third_km - second_km, None, "km", match.group(0).strip()))
+    if third_months > second_months:
+        facts.append(Fact("OIL_FILTER_INTERVAL_MONTHS", float(third_months - second_months), None, "months", match.group(0).strip()))
     return facts
 
 

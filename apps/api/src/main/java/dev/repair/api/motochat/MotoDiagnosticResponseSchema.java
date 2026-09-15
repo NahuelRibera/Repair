@@ -19,17 +19,36 @@ final class MotoDiagnosticResponseSchema {
 
     static final String NAME = "moto_diagnostic_answer";
 
+    /**
+     * The rider-intent classification every proposed action must carry.
+     * Only CONFIRMED_COMPLETED may ever be executed as a write — see
+     * MotoDiagnosticAnswer.ProposedMaintenanceEvent and
+     * MotoChatOrchestrationService.validateAndApplyProposedActions.
+     */
+    static final List<String> INTENT_VALUES = List.of(
+            "CONFIRMED_COMPLETED", "UNCERTAIN_PAST", "PLANNED_FUTURE",
+            "HYPOTHETICAL", "QUESTION", "RECOMMENDATION", "UNKNOWN"
+    );
+
     static Map<String, Object> build() {
         Map<String, Object> stringArray = Map.of("type", "array", "items", Map.of("type", "string"));
+        // At most 2 follow-up questions per turn (see docs/repair-v2-architecture.md
+        // "follow-up question discipline") — the model is instructed to prefer 0-1,
+        // this is a hard ceiling so the UI can never turn into a five-question form.
+        Map<String, Object> followUpArray = Map.of(
+                "type", "array", "items", Map.of("type", "string"), "maxItems", 2
+        );
         Map<String, Object> integerArray = Map.of("type", "array", "items", Map.of("type", "integer"));
         Map<String, Object> nullableString = Map.of("type", List.of("string", "null"));
         Map<String, Object> nullableNumber = Map.of("type", List.of("number", "null"));
+        Map<String, Object> intentEnum = Map.of("type", "string", "enum", INTENT_VALUES);
 
         Map<String, Object> proposedMaintenanceEventProps = new LinkedHashMap<>();
         proposedMaintenanceEventProps.put("serviceType", Map.of("type", "string", "enum", List.copyOf(ServiceType.VALID)));
         proposedMaintenanceEventProps.put("odometerKm", nullableNumber);
         proposedMaintenanceEventProps.put("performedAt", nullableString);
         proposedMaintenanceEventProps.put("notes", nullableString);
+        proposedMaintenanceEventProps.put("intent", intentEnum);
         Map<String, Object> proposedMaintenanceEvent = Map.of(
                 "type", List.of("object", "null"),
                 "additionalProperties", false,
@@ -37,11 +56,13 @@ final class MotoDiagnosticResponseSchema {
                 "properties", proposedMaintenanceEventProps
         );
 
-        Map<String, Object> proposedOdometerUpdateProps = Map.of("odometerKm", Map.of("type", "number"));
+        Map<String, Object> proposedOdometerUpdateProps = new LinkedHashMap<>();
+        proposedOdometerUpdateProps.put("odometerKm", Map.of("type", "number"));
+        proposedOdometerUpdateProps.put("intent", intentEnum);
         Map<String, Object> proposedOdometerUpdate = Map.of(
                 "type", List.of("object", "null"),
                 "additionalProperties", false,
-                "required", List.of("odometerKm"),
+                "required", List.copyOf(proposedOdometerUpdateProps.keySet()),
                 "properties", proposedOdometerUpdateProps
         );
 
@@ -64,7 +85,8 @@ final class MotoDiagnosticResponseSchema {
         ));
         properties.put("summary", Map.of("type", "string"));
         properties.put("confirmedFacts", stringArray);
-        properties.put("followUpQuestions", stringArray);
+        properties.put("contextUsed", stringArray);
+        properties.put("followUpQuestions", followUpArray);
         properties.put("safeChecks", stringArray);
         properties.put("cautions", stringArray);
         properties.put("sourceChunkIds", integerArray);

@@ -45,6 +45,29 @@ public class GarageVehicleRepository {
                 .single();
     }
 
+    /** The same (visitor, model, year) canonical bike, if this visitor
+     * already has one — used by the normal "choose your bike" flow to
+     * reuse an existing garage vehicle instead of silently creating a
+     * duplicate physical motorcycle every time the same bike is selected
+     * again. The explicit "+ Add another bike" flow bypasses this (see
+     * GarageVehicleController) since a rider may genuinely own two
+     * identical bikes. Oldest match wins, so a rider's existing
+     * conversations/history stay attached to the bike they've been using. */
+    public Optional<Long> findExisting(UUID visitorId, long modelId, int year) {
+        return jdbcClient.sql(
+                        """
+                        SELECT id FROM garage_vehicles
+                        WHERE visitor_id = :visitorId AND model_id = :modelId AND year = :year AND deleted_at IS NULL
+                        ORDER BY created_at
+                        LIMIT 1
+                        """)
+                .param("visitorId", visitorId)
+                .param("modelId", modelId)
+                .param("year", year)
+                .query(Long.class)
+                .optional();
+    }
+
     public List<GarageVehicleDto> list(UUID visitorId) {
         return jdbcClient.sql(SELECT + " WHERE g.visitor_id = :visitorId AND g.deleted_at IS NULL ORDER BY g.created_at")
                 .param("visitorId", visitorId)

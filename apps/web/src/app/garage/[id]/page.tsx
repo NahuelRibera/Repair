@@ -18,6 +18,7 @@ const STATUS_STYLES: Record<MaintenanceStatus, { label: string; className: strin
   DUE_SOON: { label: "Due soon", className: "bg-amber-50 text-amber-800 border-amber-200" },
   DUE: { label: "Due", className: "bg-orange-50 text-orange-800 border-orange-200" },
   OVERDUE: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
+  INTERVAL_KNOWN_NO_HISTORY: { label: "Interval known", className: "bg-blue-50 text-blue-700 border-blue-200" },
   UNKNOWN: { label: "Unknown", className: "bg-gray-100 text-gray-600 border-gray-300" },
 };
 
@@ -199,6 +200,15 @@ function StatusCardView({ card }: { card: MaintenanceStatusCard }) {
       </div>
       {card.status === "UNKNOWN" ? (
         <p className="text-xs text-muted">{card.note ?? "Not enough data yet"}</p>
+      ) : card.status === "INTERVAL_KNOWN_NO_HISTORY" ? (
+        <div className="text-xs text-muted space-y-0.5">
+          {card.intervalKm != null && <p>Interval: every {Math.round(card.intervalKm).toLocaleString()} km</p>}
+          {card.intervalMonths != null && <p>Interval: every {Math.round(card.intervalMonths)} months</p>}
+          {card.remainingKm != null && (
+            <p>Next scheduled: ~{Math.round(card.intervalKm ?? 0).toLocaleString()} km · {Math.round(card.remainingKm).toLocaleString()} km remaining</p>
+          )}
+          <p className="italic">{card.note ?? "No previous service recorded"}</p>
+        </div>
       ) : (
         <div className="text-xs text-muted space-y-0.5">
           {card.lastOdometerKm != null && <p>Last: {Math.round(card.lastOdometerKm).toLocaleString()} km</p>}

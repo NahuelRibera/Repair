@@ -226,7 +226,7 @@ export interface MaintenanceEvent {
   createdAt: string;
 }
 
-export type MaintenanceStatus = "UNKNOWN" | "OK" | "DUE_SOON" | "DUE" | "OVERDUE";
+export type MaintenanceStatus = "UNKNOWN" | "INTERVAL_KNOWN_NO_HISTORY" | "OK" | "DUE_SOON" | "DUE" | "OVERDUE";
 
 export interface MaintenanceStatusCard {
   serviceType: MaintenanceServiceType;
@@ -280,6 +280,7 @@ export interface MotoDiagnosticAnswer {
   answerType: MotoAnswerType;
   summary: string;
   confirmedFacts: string[];
+  contextUsed: string[];
   followUpQuestions: string[];
   safeChecks: string[];
   cautions: string[];
@@ -317,6 +318,7 @@ export interface MotoRagRunDebug {
   generationMillis: number | null;
   providerStatus: string;
   errorDetail: string | null;
+  actionsTakenJson: string | null;
 }
 
 export interface ActionTaken {

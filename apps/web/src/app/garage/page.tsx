@@ -21,7 +21,10 @@ export default function GaragePage() {
   async function addBike(modelId: number, year: number) {
     setError(null);
     try {
-      await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year });
+      // Explicit "add a bike" flow — always create a new garage vehicle,
+      // even if an identical manufacturer/model/year already exists
+      // (a rider may genuinely own two of the same bike).
+      await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year, allowDuplicate: true });
       setAddingBike(false);
       refresh();
     } catch {

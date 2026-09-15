@@ -1,11 +1,91 @@
 # Implementation status
 
-Last updated: 2026-09-14 (Repair V2 motorcycle pivot). Working log, not a
-changelog — describes what is actually verified right now. Everything
-below the "Repair V2 motorcycle pivot" section is the car prototype's own
-history, preserved as-is (that prototype is a preserved historical
-checkpoint, not deleted — see CLAUDE.md and
-`docs/repair-v2-current-state.md`).
+Last updated: 2026-09-14 (post-launch QA/correctness pass on the
+motorcycle vertical slice). Working log, not a changelog — describes what
+is actually verified right now. Everything below the "Repair V2
+motorcycle pivot" section is the car prototype's own history, preserved
+as-is (that prototype is a preserved historical checkpoint, not deleted —
+see CLAUDE.md and `docs/repair-v2-current-state.md`).
+
+## QA / correctness pass on the motorcycle vertical slice (2026-09-14)
+
+Manual QA on the checkpoint tagged `motorcycle-v2-functional-checkpoint`
+found several real bugs; this pass fixed them, added regression coverage,
+and live-verified every fix against the real Yamaha corpus with a real
+model. See `docs/maintenance-tracking.md` for the design detail. Summary:
+
+- **Critical fix — false-positive maintenance writes.** A hypothetical
+  question ("If I were at 25,000 km, what maintenance would be due?")
+  could produce a saved maintenance event / odometer update. Root cause:
+  the only guard was a system-prompt instruction with no backend
+  enforcement. Fixed with a two-layer gate — every proposal now carries a
+  model-reported `intent` (CONFIRMED_COMPLETED/UNCERTAIN_PAST/
+  PLANNED_FUTURE/HYPOTHETICAL/QUESTION/RECOMMENDATION/UNKNOWN), and a new
+  deterministic `ActionIntentGuard` independently vetoes any proposal —
+  regardless of the model's own claimed intent — when the rider's raw
+  message contains hypothetical/uncertain/planned-future language. Live
+  re-tested with the exact reported message: zero DB writes, odometer
+  unchanged. See `ActionIntentGuardTest`,
+  `MotoChatOrchestrationServiceTest` scenarios A–I.
+- **Garage duplication fixed.** Selecting the same bike repeatedly
+  through the normal flow now reuses the existing garage vehicle
+  (`GarageVehicleRepository.findExisting`); the Garage page's explicit
+  "+ Add another bike" still creates a genuinely new one. Live-verified:
+  three repeated selections all returned the same vehicle id; the
+  garage's own list never grew.
+- **Maintenance dashboard fact mapping expanded.** Added deterministic
+  extraction (Python) for oil-filter, air-filter, chain-lube, and
+  spark-plug intervals (derived from real consecutive numbers already in
+  the source Markdown, never fabricated), and wired them into
+  `MaintenanceStatusService`'s service-type mapping. A new
+  `INTERVAL_KNOWN_NO_HISTORY` status is now distinct from `UNKNOWN` — "we
+  know the interval, we just don't have your history" vs. "we have no
+  verified interval at all." Live-verified: the dashboard for a fresh
+  bike now shows real intervals ("Interval known" badge, e.g. "every
+  12,000 km") for 7 of 10 service types instead of blanket "Unknown".
+- **Provenance separation.** The structured answer now has a separate
+  `contextUsed` field (the rider's own odometer/history/preferences) next
+  to `confirmedFacts` (verified manufacturer facts only), rendered as two
+  visually distinct sections in the UI. Fixed the actual root cause of
+  raw-enum leakage into chat text: the facts block sent to the model used
+  to say "prefer these verbatim" over a line literally labeled with the
+  raw fact_type key (e.g. "ENGINE_OIL_INTERVAL_KM: 6000 km") — now uses
+  `MotorcycleFactLabels` for human phrasing, plus a frontend regex
+  safety net.
+- **Context relevance.** Maintenance history is now filtered by
+  query-keyword relevance before being sent to the model
+  (`MaintenanceContextRelevance`) — an overheating question no longer
+  drags in unrelated chain-lubrication history. Live-verified.
+- **Follow-up question cap.** Schema-level `maxItems: 2` on
+  `followUpQuestions` plus a server-side clamp as a second guarantee.
+- **Chat titles.** Sidebar conversations about the same bike no longer
+  all show the identical bike name — a deterministic (no extra AI call)
+  keyword-based `ChatTitleGenerator` assigns a topic title from the first
+  message ("Oil change", "Cooling issue", etc.), falling back to a
+  trimmed excerpt.
+- **Prompt rewrite** covering: general-guidance vs. verified-fact
+  labeling (never "official data"), personalized-advice vs. verified
+  baseline separation, deterministic unit conversion (no unnecessary
+  clarification), appropriately uncertain troubleshooting language, and
+  honesty about partial procedures. These are model-behavior fixes,
+  spot-verified live (see `docs/retrieval-evaluation.md`) rather than
+  unit-testable, since they depend on live model phrasing.
+
+**Tests**: Java 87/87 (was ~70 before this pass; new:
+`ActionIntentGuardTest`, `ChatTitleGeneratorTest`,
+`MaintenanceContextRelevanceTest`, `GarageVehicleControllerTest`, plus
+expanded `MotoChatOrchestrationServiceTest` and
+`MaintenanceStatusServiceTest`), Python 50/50 (was 48; new fact-extractor
+tests), `tsc --noEmit` and `next build` clean.
+
+**Known limitations after this pass**: no automated Playwright coverage
+was added for the motorcycle flow (still manual + live verification, as
+in the prior pass); model-behavior prompt fixes (context relevance
+nuance, procedural honesty, troubleshooting tone) are verified by spot
+example, not exhaustively, since they depend on live LLM output rather
+than deterministic code; the "next scheduled" dashboard figure for
+`INTERVAL_KNOWN_NO_HISTORY` assumes zero prior service, which is a
+labeled best-effort convention, not a verified fact.
 
 ## Repair V2 motorcycle pivot (2026-09-14)
 

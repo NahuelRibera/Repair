@@ -55,6 +55,38 @@ class GarageVehicleRepositoryIT {
     }
 
     @Test
+    void findExistingReusesTheSameCanonicalBikeForOneVisitor() {
+        long modelId = seedModel();
+        UUID visitor = UUID.randomUUID();
+        long firstId = garageVehicleRepository.create(visitor, modelId, 2021, null, null);
+
+        var found = garageVehicleRepository.findExisting(visitor, modelId, 2021);
+
+        assertThat(found).contains(firstId);
+    }
+
+    @Test
+    void findExistingDoesNotMatchADifferentYearOrAnotherVisitor() {
+        long modelId = seedModel();
+        UUID visitor = UUID.randomUUID();
+        UUID stranger = UUID.randomUUID();
+        garageVehicleRepository.create(visitor, modelId, 2021, null, null);
+
+        assertThat(garageVehicleRepository.findExisting(visitor, modelId, 2022)).isEmpty();
+        assertThat(garageVehicleRepository.findExisting(stranger, modelId, 2021)).isEmpty();
+    }
+
+    @Test
+    void findExistingIgnoresASoftDeletedVehicle() {
+        long modelId = seedModel();
+        UUID visitor = UUID.randomUUID();
+        long id = garageVehicleRepository.create(visitor, modelId, 2021, null, null);
+        garageVehicleRepository.softDelete(visitor, id);
+
+        assertThat(garageVehicleRepository.findExisting(visitor, modelId, 2021)).isEmpty();
+    }
+
+    @Test
     void deletedVehicleNoLongerAppearsForItsOwner() {
         long modelId = seedModel();
         UUID visitor = UUID.randomUUID();

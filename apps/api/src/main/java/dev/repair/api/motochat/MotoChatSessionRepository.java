@@ -101,6 +101,25 @@ public class MotoChatSessionRepository {
                 .update();
     }
 
+    public long countMessages(long sessionId) {
+        return jdbcClient.sql("SELECT count(*) FROM moto_chat_messages WHERE session_id = :id")
+                .param("id", sessionId)
+                .query(Long.class)
+                .single();
+    }
+
+    /** Used once, right after the rider's first message, to replace the
+     * generic bike-name title with a deterministic topic title — see
+     * ChatTitleGenerator. Not visitor-scoped: the caller already holds an
+     * ownership-checked sessionId from the same request that just wrote
+     * to this session. */
+    public void updateTitle(long sessionId, String title) {
+        jdbcClient.sql("UPDATE moto_chat_sessions SET title = :title WHERE id = :id")
+                .param("title", title)
+                .param("id", sessionId)
+                .update();
+    }
+
     public long insertMessage(long sessionId, String role, String content, String structuredResponseJson) {
         return jdbcClient.sql(
                         """

@@ -47,11 +47,24 @@ export function MotoAnswerCard({
 
       {answer.confirmedFacts.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-muted mb-1.5">Bike-specific facts used</p>
+          <p className="text-xs font-semibold text-muted mb-1.5">Verified bike facts</p>
           <div className="flex flex-wrap gap-1.5">
             {answer.confirmedFacts.map((s, i) => (
+              <span key={i} className="rounded-full bg-green-50 border border-green-100 text-green-800 px-2.5 py-1 text-xs">
+                {humanize(s)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {answer.contextUsed.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted mb-1.5">Your bike</p>
+          <div className="flex flex-wrap gap-1.5">
+            {answer.contextUsed.map((s, i) => (
               <span key={i} className="rounded-full bg-black/5 px-2.5 py-1 text-xs">
-                {s}
+                {humanize(s)}
               </span>
             ))}
           </div>
@@ -129,4 +142,21 @@ function actionLabel(action: ActionTaken): string {
 
 function formatKm(value: number): string {
   return Math.round(value).toLocaleString("en-US");
+}
+
+// Defensive safety net: if a raw internal fact/enum key (e.g.
+// "ENGINE_OIL_INTERVAL_KM") ever slips into model-generated text despite
+// the backend's human-label prompt injection, turn it into readable words
+// rather than showing it verbatim in the normal chat UI. Internal keys
+// are fine in Evidence & Debug — never in this card.
+const ENUM_TOKEN_RE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){1,}\b/g;
+
+function humanize(text: string): string {
+  return text.replace(ENUM_TOKEN_RE, (token) =>
+    token
+      .toLowerCase()
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ")
+  );
 }

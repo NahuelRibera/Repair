@@ -79,6 +79,69 @@ Total OpenAI spend for the full ingestion + live verification session:
 the existing per-turn evidence-word and output-token caps
 (`ChatProperties`).
 
+## Live manual verification — QA/correctness pass (2026-09-14)
+
+Performed against the real running app (real `OPENAI_API_KEY`,
+`gpt-4.1-mini`) after the action-confidence and dashboard fixes, directly
+reproducing the manual QA scenarios that motivated the pass:
+
+1. **Uncertain history never writes.** "When is my next oil change?" →
+   clarifying question; then "I think the previous owner changed the oil
+   at 12,000 km, but I'm not sure." → the model itself asked "Do you want
+   me to record that as a confirmed oil change, or is it only an
+   estimate?", `actionsTaken: []`, zero rows in `maintenance_events`.
+2. **Confirmed maintenance persists.** "I changed the oil myself
+   yesterday at 18,450 km." → `maintenance_event_created` action, real
+   DB row (`ENGINE_OIL_CHANGE`, 18,450 km, `created_via='chat'`); current
+   odometer correctly left untouched (the statement was about a past
+   event, not current mileage).
+3. **Hypothetical is read-only — the exact reported bug.** Odometer set
+   to 18,450 km; "If I were at 25,000 km, what maintenance would be
+   due?" → useful, correct hypothetical answer (oil/filter/plugs due
+   near 24,450–25,000 km, air filter/valve clearance much later),
+   `actionsTaken: []`, odometer confirmed still 18,450 km afterward, no
+   new `maintenance_events` row at 25,000 km.
+4. **Dashboard reflects known intervals without history.** Fresh
+   garage vehicle's `/dashboard` response: `SPARK_PLUG_CHANGE`,
+   `OIL_FILTER_CHANGE`, `CHAIN_LUBE`, `AIR_FILTER_CHANGE`,
+   `VALVE_CLEARANCE_CHECK`, `COOLANT_CHANGE`, `BRAKE_FLUID_CHANGE` all
+   returned `INTERVAL_KNOWN_NO_HISTORY` with real interval values (e.g.
+   `AIR_FILTER_CHANGE`: interval 37,000 km, remaining 18,550 km at a
+   18,450 km odometer); `CHAIN_ADJUSTMENT`/`TIRE_REPLACEMENT`/
+   `BATTERY_REPLACEMENT` honestly stayed `UNKNOWN`. Confirmed visually in
+   the browser (blue "Interval known" badges vs. gray "Unknown").
+5. **Missing exact spec still refused.** "What is the exact torque for
+   the camshaft bearing cap bolts?" → `insufficient_evidence`,
+   `sourceChunkIds: []`, no invented number.
+6. **Deterministic unit conversion, no clarification round-trip.** After
+   "What tire pressure should I use?" (250 kPa front/rear), "instead of
+   kPa, bar" → "...250 kPa..., which converts to 2.50 bar," zero
+   follow-up questions, no re-asking which pressure was meant.
+7. **Garage reuse vs. explicit duplicate.** Three consecutive normal
+   selections of the same manufacturer/model/year returned the same
+   garage vehicle id (`200 OK` after the first `201 Created`); the
+   garage's own vehicle count never grew. `allowDuplicate: true` (the
+   Garage page's own "+ Add another bike") created a genuinely new row.
+   Reconfirmed in the browser: selecting an already-owned bike through
+   "+ New chat" opened a new *conversation* but did not add a new bike to
+   My Garage.
+8. **Context relevance.** After recording an unrelated chain-lube event,
+   "I feel the bike is hotter than usual" → answer referenced coolant
+   capacity/interval and engine oil, `contextUsed` contained only the
+   current odometer — no chain-lubrication history leaked into the
+   response.
+9. **Provenance separation, visually confirmed in the browser.** A live
+   answer rendered two distinct sections: "Verified bike facts" (green —
+   "Engine oil change interval: 6,000 km or 6 months") and "Your bike"
+   (gray — "Engine Oil Change at 18450 km"), plus exactly one follow-up
+   question.
+
+All nine scenarios passed as specified. This is qualitative,
+example-based verification (the same honest caveat as the previous live
+verification round) — not a statistical evaluation — but it directly
+reproduces the originally-reported bug scenarios with a real model, not a
+mock.
+
 ## Known gap
 
 No automated Playwright end-to-end test was added for the motorcycle

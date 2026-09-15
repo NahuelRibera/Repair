@@ -6,6 +6,8 @@ from embeddings.motorcycle_facts import extract_facts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MT07_2025 = REPO_ROOT / "knowledge/motorcycles/yamaha/mt-07/2025.md"
+MT09_2025 = REPO_ROOT / "knowledge/motorcycles/yamaha/mt-09/2025.md"
+TENERE_700_2025 = REPO_ROOT / "knowledge/motorcycles/yamaha/tenere-700/2025.md"
 
 
 def _facts_by_type(body: str) -> dict[str, object]:
@@ -34,6 +36,39 @@ def test_extract_facts_against_real_mt07_file():
     assert facts["ENGINE_OIL_INTERVAL_MONTHS"].value_numeric == 6
     assert facts["COOLANT_CHANGE_INTERVAL_MONTHS"].value_numeric == 36
     assert facts["BRAKE_FLUID_INTERVAL_MONTHS"].value_numeric == 24
+    # New maintenance-dashboard fact types (QA pass section 7/33).
+    assert facts["AIR_FILTER_INTERVAL_KM"].value_numeric == 37000
+    assert facts["CHAIN_LUBE_INTERVAL_KM"].value_numeric == 1000
+    # MT-07 uses the "Replace at 13,000 and 25,000 km" two-point wording —
+    # the km interval is the real, stated difference, never invented.
+    assert facts["SPARK_PLUG_REPLACE_INTERVAL_KM"].value_numeric == 12000
+    assert "SPARK_PLUG_REPLACE_INTERVAL_MONTHS" not in facts  # not cleanly derivable from this wording
+    assert facts["OIL_FILTER_INTERVAL_KM"].value_numeric == 12000
+    assert facts["OIL_FILTER_INTERVAL_MONTHS"].value_numeric == 12
+
+
+def test_extract_facts_against_real_mt09_simple_spark_plug_wording():
+    # MT-09 uses the simpler "Replace every 19,000 km or 18 months" form —
+    # both km and months are directly stated, not derived.
+    body = MT09_2025.read_text(encoding="utf-8")
+    facts = _facts_by_type(body)
+
+    assert facts["SPARK_PLUG_REPLACE_INTERVAL_KM"].value_numeric == 19000
+    assert facts["SPARK_PLUG_REPLACE_INTERVAL_MONTHS"].value_numeric == 18
+
+
+def test_extract_facts_never_fabricates_chain_lube_km_when_source_gives_no_number():
+    # Ténéré 700's chain section says "at the scheduled interval" with no
+    # standalone km figure in this file — must stay unextracted, not guessed.
+    body = TENERE_700_2025.read_text(encoding="utf-8")
+    facts = _facts_by_type(body)
+
+    assert "CHAIN_LUBE_INTERVAL_KM" not in facts
+    # The air filter and spark plug facts are still present for this model,
+    # proving the missing chain figure is a genuine per-file absence, not a
+    # global extractor failure.
+    assert facts["AIR_FILTER_INTERVAL_KM"].value_numeric == 19000
+    assert facts["SPARK_PLUG_REPLACE_INTERVAL_KM"].value_numeric == 12000
 
 
 def test_extract_facts_accepts_alternate_chain_wording():
@@ -49,6 +84,7 @@ def test_extract_facts_accepts_alternate_chain_wording():
     facts = _facts_by_type(body)
     assert facts["CHAIN_SLACK_MM"].value_text == "36.0-41.0 mm"
     assert "1,000 km" in facts["CHAIN_LUBE_INTERVAL"].value_text
+    assert facts["CHAIN_LUBE_INTERVAL_KM"].value_numeric == 1000
 
 
 def test_extract_facts_never_invents_a_value_for_missing_section():
