@@ -41,4 +41,26 @@ class MaintenanceContextRelevanceTest {
 
         assertThat(filtered).extracting(MaintenanceEventDto::serviceType).containsExactly("ENGINE_OIL_CHANGE");
     }
+
+    @Test
+    void airFilterQuestionNeverPullsInOilFilterHistory() {
+        // Regression for the OIL_FILTER/AIR_FILTER cross-mapping bug: the
+        // bare keyword "filter" on OIL_FILTER_CHANGE used to also match an
+        // "air filter" question (since it contains the substring
+        // "filter"), incorrectly surfacing unrelated oil-filter history.
+        List<MaintenanceEventDto> history = List.of(event("OIL_FILTER_CHANGE"), event("AIR_FILTER_CHANGE"));
+
+        List<MaintenanceEventDto> filtered = MaintenanceContextRelevance.filter(history, "When should I replace the air filter?");
+
+        assertThat(filtered).extracting(MaintenanceEventDto::serviceType).containsExactly("AIR_FILTER_CHANGE");
+    }
+
+    @Test
+    void oilFilterQuestionNeverPullsInAirFilterHistory() {
+        List<MaintenanceEventDto> history = List.of(event("OIL_FILTER_CHANGE"), event("AIR_FILTER_CHANGE"));
+
+        List<MaintenanceEventDto> filtered = MaintenanceContextRelevance.filter(history, "When did I last replace the oil filter?");
+
+        assertThat(filtered).extracting(MaintenanceEventDto::serviceType).containsExactly("OIL_FILTER_CHANGE");
+    }
 }

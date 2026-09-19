@@ -2,7 +2,6 @@ package dev.repair.api.garage;
 
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -35,18 +34,18 @@ public class VehiclePreferenceRepository {
                 .update();
     }
 
-    public List<VehiclePreferenceDto> listForOwnedVehicle(UUID visitorId, long garageVehicleId) {
+    public List<VehiclePreferenceDto> listForOwnedVehicle(long userId, long garageVehicleId) {
         return jdbcClient.sql(
                         """
                         SELECT p.id, p.garage_vehicle_id, p.preference_type, p.context, p.data::text AS data_json,
                                p.created_at, p.updated_at
                         FROM vehicle_preferences p
                         JOIN garage_vehicles g ON g.id = p.garage_vehicle_id
-                        WHERE p.garage_vehicle_id = :garageVehicleId AND g.visitor_id = :visitorId AND g.deleted_at IS NULL
+                        WHERE p.garage_vehicle_id = :garageVehicleId AND g.user_id = :userId AND g.deleted_at IS NULL
                         ORDER BY p.preference_type, p.context
                         """)
                 .param("garageVehicleId", garageVehicleId)
-                .param("visitorId", visitorId)
+                .param("userId", userId)
                 .query((rs, rowNum) -> new VehiclePreferenceDto(
                         rs.getLong("id"), rs.getLong("garage_vehicle_id"), rs.getString("preference_type"),
                         rs.getString("context"), rs.getString("data_json"),

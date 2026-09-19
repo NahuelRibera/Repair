@@ -226,7 +226,14 @@ export interface MaintenanceEvent {
   createdAt: string;
 }
 
-export type MaintenanceStatus = "UNKNOWN" | "INTERVAL_KNOWN_NO_HISTORY" | "OK" | "DUE_SOON" | "DUE" | "OVERDUE";
+export type MaintenanceStatus =
+  | "UNKNOWN"
+  | "INTERVAL_KNOWN_NO_HISTORY"
+  | "OK"
+  | "DUE_SOON"
+  | "DUE"
+  | "OVERDUE"
+  | "DATA_INCONSISTENT";
 
 export interface MaintenanceStatusCard {
   serviceType: MaintenanceServiceType;
@@ -285,7 +292,7 @@ export interface MotoDiagnosticAnswer {
   safeChecks: string[];
   cautions: string[];
   sourceChunkIds: number[];
-  proposedMaintenanceEvent: unknown;
+  proposedMaintenanceEvents: unknown;
   proposedOdometerUpdate: unknown;
   proposedPreference: unknown;
 }
@@ -334,6 +341,21 @@ export interface MotoChatTurnResult {
   evidence: MotoEvidenceCard[];
   actionsTaken: ActionTaken[];
   debug: MotoRagRunDebug;
+}
+
+// ---- Authenticated Repair user (Google OAuth only) ----
+// Mirrors dev.repair.api.auth.AppUserDto. googleSub is not a secret (it's
+// just Google's stable per-account identifier) but is never used for
+// anything client-side — ownership is always enforced server-side.
+
+export interface AppUser {
+  id: number;
+  googleSub: string;
+  email: string;
+  displayName: string | null;
+  googlePictureUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DataQualitySummary {

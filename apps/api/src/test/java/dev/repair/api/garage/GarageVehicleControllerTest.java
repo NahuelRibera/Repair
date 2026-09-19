@@ -5,16 +5,19 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import dev.repair.api.common.VisitorContext;
+import dev.repair.api.auth.AppUserDto;
+import dev.repair.api.auth.AuthenticatedUserContext;
+import dev.repair.api.common.NotFoundException;
 import dev.repair.api.motorcycle.ModelDetailDto;
 import dev.repair.api.motorcycle.MotorcycleCatalogRepository;
 import java.time.OffsetDateTime;
 import java.util.Optional;
-import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,7 +35,7 @@ import org.springframework.http.HttpStatus;
 @ExtendWith(MockitoExtension.class)
 class GarageVehicleControllerTest {
 
-    private static final UUID VISITOR_ID = UUID.randomUUID();
+    private static final long VISITOR_ID = 101L;
     private static final long MODEL_ID = 3L;
     private static final int YEAR = 2021;
 
@@ -45,13 +48,17 @@ class GarageVehicleControllerTest {
 
     @BeforeEach
     void setUp() {
-        VisitorContext visitor = new VisitorContext();
-        visitor.setVisitorId(VISITOR_ID);
-        controller = new GarageVehicleController(garageVehicleRepository, catalogRepository, visitor);
+        AuthenticatedUserContext currentUser = new AuthenticatedUserContext();
+        currentUser.setUser(new AppUserDto(VISITOR_ID, "google-sub-101", "rider@example.test", "Test Rider",
+                null, OffsetDateTime.now(), OffsetDateTime.now()));
+        controller = new GarageVehicleController(garageVehicleRepository, catalogRepository, currentUser);
 
-        when(catalogRepository.findModelDetail(MODEL_ID))
+        // lenient() — only the create() tests consult the catalog; the
+        // delete() tests below never touch it, and strict stubbing would
+        // otherwise fail those with UnnecessaryStubbingException.
+        lenient().when(catalogRepository.findModelDetail(MODEL_ID))
                 .thenReturn(Optional.of(new ModelDetailDto(MODEL_ID, 1L, "Yamaha", "Tenere 700", "tenere-700")));
-        when(catalogRepository.hasKnowledgeCoverage(MODEL_ID, YEAR)).thenReturn(true);
+        lenient().when(catalogRepository.hasKnowledgeCoverage(MODEL_ID, YEAR)).thenReturn(true);
     }
 
     private GarageVehicleDto sampleDto(long id) {
@@ -94,6 +101,22 @@ class GarageVehicleControllerTest {
         assertThat(response.getBody().id()).isEqualTo(9L);
         // allowDuplicate=true must never even consult findExisting — the
         // rider explicitly asked to add another one.
-        verify(garageVehicleRepository, never()).findExisting(any(), anyLong(), anyInt());
+        verify(garageVehicleRepository, never()).findExisting(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void deleteRemovesTheVehicleAndAllItsDataForTheCurrentUser() {
+        when(garageVehicleRepository.deleteVehicleAndAllData(VISITOR_ID, 42L)).thenReturn(true);
+
+        controller.delete(42L);
+
+        verify(garageVehicleRepository).deleteVehicleAndAllData(VISITOR_ID, 42L);
+    }
+
+    @Test
+    void deleteOfAnUnknownOrNonOwnedVehicleIsRejectedAsNotFound() {
+        when(garageVehicleRepository.deleteVehicleAndAllData(VISITOR_ID, 999L)).thenReturn(false);
+
+        assertThatThrownBy(() -> controller.delete(999L)).isInstanceOf(NotFoundException.class);
     }
 }

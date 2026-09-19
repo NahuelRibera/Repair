@@ -5,13 +5,12 @@ import java.sql.SQLException;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /** Ownership baked into SQL, same pattern as
  * dev.repair.api.conversation.SessionRepository — every method takes
- * visitorId as a real filter, never trusted from a path/body id alone. */
+ * userId as a real filter, never trusted from a path/body id alone. */
 @Repository
 public class MotoChatSessionRepository {
 
@@ -30,31 +29,31 @@ public class MotoChatSessionRepository {
         this.jdbcClient = jdbcClient;
     }
 
-    public long createSession(UUID visitorId, long garageVehicleId, String title) {
+    public long createSession(long userId, long garageVehicleId, String title) {
         return jdbcClient.sql(
                         """
-                        INSERT INTO moto_chat_sessions (visitor_id, garage_vehicle_id, title)
-                        VALUES (:visitorId, :garageVehicleId, :title)
+                        INSERT INTO moto_chat_sessions (user_id, garage_vehicle_id, title)
+                        VALUES (:userId, :garageVehicleId, :title)
                         RETURNING id
                         """)
-                .param("visitorId", visitorId)
+                .param("userId", userId)
                 .param("garageVehicleId", garageVehicleId)
                 .param("title", title)
                 .query(Long.class)
                 .single();
     }
 
-    public List<MotoSessionSummaryDto> listSessions(UUID visitorId) {
-        return jdbcClient.sql(SELECT_SUMMARY + " WHERE s.visitor_id = :visitorId AND s.deleted_at IS NULL ORDER BY s.updated_at DESC LIMIT 200")
-                .param("visitorId", visitorId)
+    public List<MotoSessionSummaryDto> listSessions(long userId) {
+        return jdbcClient.sql(SELECT_SUMMARY + " WHERE s.user_id = :userId AND s.deleted_at IS NULL ORDER BY s.updated_at DESC LIMIT 200")
+                .param("userId", userId)
                 .query(MotoChatSessionRepository::mapSummary)
                 .list();
     }
 
-    public Optional<MotoSessionDetailDto> findSessionDetail(UUID visitorId, long sessionId) {
+    public Optional<MotoSessionDetailDto> findSessionDetail(long userId, long sessionId) {
         Optional<MotoSessionSummaryDto> summary = jdbcClient.sql(
-                        SELECT_SUMMARY + " WHERE s.visitor_id = :visitorId AND s.id = :sessionId AND s.deleted_at IS NULL")
-                .param("visitorId", visitorId)
+                        SELECT_SUMMARY + " WHERE s.user_id = :userId AND s.id = :sessionId AND s.deleted_at IS NULL")
+                .param("userId", userId)
                 .param("sessionId", sessionId)
                 .query(MotoChatSessionRepository::mapSummary)
                 .optional();
@@ -77,20 +76,20 @@ public class MotoChatSessionRepository {
         return Optional.of(new MotoSessionDetailDto(summary.get(), messages));
     }
 
-    public Optional<Long> findGarageVehicleIdForSession(UUID visitorId, long sessionId) {
+    public Optional<Long> findGarageVehicleIdForSession(long userId, long sessionId) {
         return jdbcClient.sql(
-                        "SELECT garage_vehicle_id FROM moto_chat_sessions WHERE id = :id AND visitor_id = :visitorId AND deleted_at IS NULL")
+                        "SELECT garage_vehicle_id FROM moto_chat_sessions WHERE id = :id AND user_id = :userId AND deleted_at IS NULL")
                 .param("id", sessionId)
-                .param("visitorId", visitorId)
+                .param("userId", userId)
                 .query(Long.class)
                 .optional();
     }
 
-    public boolean softDelete(UUID visitorId, long sessionId) {
+    public boolean softDelete(long userId, long sessionId) {
         int updated = jdbcClient.sql(
-                        "UPDATE moto_chat_sessions SET deleted_at = now() WHERE id = :id AND visitor_id = :visitorId AND deleted_at IS NULL")
+                        "UPDATE moto_chat_sessions SET deleted_at = now() WHERE id = :id AND user_id = :userId AND deleted_at IS NULL")
                 .param("id", sessionId)
-                .param("visitorId", visitorId)
+                .param("userId", userId)
                 .update();
         return updated > 0;
     }
@@ -110,7 +109,7 @@ public class MotoChatSessionRepository {
 
     /** Used once, right after the rider's first message, to replace the
      * generic bike-name title with a deterministic topic title — see
-     * ChatTitleGenerator. Not visitor-scoped: the caller already holds an
+     * ChatTitleGenerator. Not user-scoped: the caller already holds an
      * ownership-checked sessionId from the same request that just wrote
      * to this session. */
     public void updateTitle(long sessionId, String title) {

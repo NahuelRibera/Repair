@@ -110,7 +110,7 @@ public class MotoRagRunRepository {
                 .single();
     }
 
-    public Optional<MotoRagRunDebugDto> findDebugForVisitor(UUID requestId, UUID visitorId) {
+    public Optional<MotoRagRunDebugDto> findDebugForUser(UUID requestId, long userId) {
         return jdbcClient.sql(
                         """
                         SELECT r.request_id, r.garage_vehicle_id, mf.canonical_name AS manufacturer_name,
@@ -124,15 +124,15 @@ public class MotoRagRunRepository {
                         JOIN garage_vehicles g ON g.id = r.garage_vehicle_id
                         JOIN motorcycle_models mm ON mm.id = g.model_id
                         JOIN motorcycle_manufacturers mf ON mf.id = mm.manufacturer_id
-                        WHERE r.request_id = :requestId AND s.visitor_id = :visitorId
+                        WHERE r.request_id = :requestId AND s.user_id = :userId
                         """)
                 .param("requestId", requestId)
-                .param("visitorId", visitorId)
+                .param("userId", userId)
                 .query(MotoRagRunRepository::mapDebug)
                 .optional();
     }
 
-    public List<MotoEvidenceCardDto> findEvidenceForVisitor(UUID requestId, UUID visitorId) {
+    public List<MotoEvidenceCardDto> findEvidenceForUser(UUID requestId, long userId) {
         return jdbcClient.sql(
                         """
                         SELECT c.id AS chunk_id, c.document_id, c.section, c.subsection, c.category,
@@ -142,11 +142,11 @@ public class MotoRagRunRepository {
                         JOIN moto_chat_sessions s ON s.id = r.session_id
                         JOIN moto_retrieved_evidence re ON re.rag_run_id = r.id
                         JOIN motorcycle_knowledge_chunks c ON c.id = re.chunk_id
-                        WHERE r.request_id = :requestId AND s.visitor_id = :visitorId
+                        WHERE r.request_id = :requestId AND s.user_id = :userId
                         ORDER BY re.rank
                         """)
                 .param("requestId", requestId)
-                .param("visitorId", visitorId)
+                .param("userId", userId)
                 .query((rs, rowNum) -> new MotoEvidenceCardDto(
                         rs.getLong("chunk_id"), rs.getLong("document_id"), rs.getString("section"),
                         rs.getString("subsection"), rs.getString("category"), rs.getString("heading"),

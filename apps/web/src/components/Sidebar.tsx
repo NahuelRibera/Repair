@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { bikeTitle } from "@/lib/types";
 import type { MotoSessionSummary } from "@/lib/types";
+import { RepairLogo } from "./RepairLogo";
 
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const router = useRouter();
@@ -32,6 +33,18 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
     refresh();
   }, [activeId]);
 
+  useEffect(() => {
+    // The Garage page's own delete flow lives outside this route tree, so
+    // it can't rely on the [activeId] effect above — it dispatches this
+    // event instead so conversations belonging to a just-deleted bike
+    // disappear from the sidebar without a full page reload.
+    function onVehicleDeleted() {
+      refresh();
+    }
+    window.addEventListener("repair:garage-vehicle-deleted", onVehicleDeleted);
+    return () => window.removeEventListener("repair:garage-vehicle-deleted", onVehicleDeleted);
+  }, []);
+
   const filtered = search.trim()
     ? sessions.filter((s) => `${s.title ?? ""} ${bikeTitle(s)}`.toLowerCase().includes(search.trim().toLowerCase()))
     : sessions;
@@ -56,17 +69,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
         }`}
       >
         <div className="p-4 border-b border-white/10 shrink-0">
-          <Link href="/" className="flex items-center gap-2.5 mb-4">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-navy shrink-0">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M21.7 16.3l-4-4a5 5 0 0 0-6.2-6.2L8.4 9.2 4.9 5.7 2.3 8.3l3.5 3.5-3.1 3.1a5 5 0 0 0 6.2 6.2l4-4 4 4 4.8-4.8zM8 20a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"
-                  fill="currentColor"
-                />
-              </svg>
-            </span>
-            <span className="text-white font-semibold">Repair</span>
-          </Link>
+          <RepairLogo dark className="mb-4" />
           <Link
             href="/chat"
             className="flex items-center justify-center gap-2 w-full rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover transition-colors mb-2"

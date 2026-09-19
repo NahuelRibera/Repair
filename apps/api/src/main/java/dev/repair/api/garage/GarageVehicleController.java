@@ -2,7 +2,7 @@ package dev.repair.api.garage;
 
 import dev.repair.api.common.BadRequestException;
 import dev.repair.api.common.NotFoundException;
-import dev.repair.api.common.VisitorContext;
+import dev.repair.api.auth.AuthenticatedUserContext;
 import dev.repair.api.motorcycle.MotorcycleCatalogRepository;
 import dev.repair.api.motorcycle.ModelDetailDto;
 import jakarta.validation.Valid;
@@ -23,15 +23,15 @@ public class GarageVehicleController {
 
     private final GarageVehicleRepository garageVehicleRepository;
     private final MotorcycleCatalogRepository catalogRepository;
-    private final VisitorContext visitor;
+    private final AuthenticatedUserContext currentUser;
 
     public GarageVehicleController(
             GarageVehicleRepository garageVehicleRepository, MotorcycleCatalogRepository catalogRepository,
-            VisitorContext visitor
+            AuthenticatedUserContext currentUser
     ) {
         this.garageVehicleRepository = garageVehicleRepository;
         this.catalogRepository = catalogRepository;
-        this.visitor = visitor;
+        this.currentUser = currentUser;
     }
 
     @PostMapping("/api/garage/vehicles")
@@ -45,28 +45,28 @@ public class GarageVehicleController {
 
         boolean allowDuplicate = Boolean.TRUE.equals(request.allowDuplicate());
         if (!allowDuplicate) {
-            var existing = garageVehicleRepository.findExisting(visitor.getVisitorId(), request.modelId(), request.year());
+            var existing = garageVehicleRepository.findExisting(currentUser.getUserId(), request.modelId(), request.year());
             if (existing.isPresent()) {
-                GarageVehicleDto dto = garageVehicleRepository.find(visitor.getVisitorId(), existing.get())
+                GarageVehicleDto dto = garageVehicleRepository.find(currentUser.getUserId(), existing.get())
                         .orElseThrow(() -> new IllegalStateException("Garage vehicle vanished immediately after lookup"));
                 return ResponseEntity.ok(dto);
             }
         }
 
-        long id = garageVehicleRepository.create(visitor.getVisitorId(), request.modelId(), request.year(), null, request.nickname());
-        GarageVehicleDto created = garageVehicleRepository.find(visitor.getVisitorId(), id)
+        long id = garageVehicleRepository.create(currentUser.getUserId(), request.modelId(), request.year(), null, request.nickname());
+        GarageVehicleDto created = garageVehicleRepository.find(currentUser.getUserId(), id)
                 .orElseThrow(() -> new IllegalStateException("Garage vehicle vanished immediately after creation"));
         return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @GetMapping("/api/garage/vehicles")
     public List<GarageVehicleDto> list() {
-        return garageVehicleRepository.list(visitor.getVisitorId());
+        return garageVehicleRepository.list(currentUser.getUserId());
     }
 
     @GetMapping("/api/garage/vehicles/{id}")
     public GarageVehicleDto get(@PathVariable long id) {
-        return garageVehicleRepository.find(visitor.getVisitorId(), id)
+        return garageVehicleRepository.find(currentUser.getUserId(), id)
                 .orElseThrow(() -> new NotFoundException("Garage vehicle not found"));
     }
 
@@ -75,18 +75,23 @@ public class GarageVehicleController {
         if (request.currentOdometerKm() != null && request.currentOdometerKm() < 0) {
             throw new BadRequestException("Odometer cannot be negative");
         }
-        boolean updated = garageVehicleRepository.update(visitor.getVisitorId(), id, request.nickname(), request.currentOdometerKm());
+        boolean updated = garageVehicleRepository.update(currentUser.getUserId(), id, request.nickname(), request.currentOdometerKm());
         if (!updated) {
             throw new NotFoundException("Garage vehicle not found");
         }
-        return garageVehicleRepository.find(visitor.getVisitorId(), id)
+        return garageVehicleRepository.find(currentUser.getUserId(), id)
                 .orElseThrow(() -> new NotFoundException("Garage vehicle not found"));
     }
 
+    /** Permanently deletes this garage vehicle and everything that
+     * belongs to it (maintenance history, preferences, chat sessions and
+     * messages) — see GarageVehicleRepository.deleteVehicleAndAllData.
+     * The frontend gates this behind its own confirmation dialog; there
+     * is deliberately no soft-delete/undo here once this is called. */
     @DeleteMapping("/api/garage/vehicles/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable long id) {
-        if (!garageVehicleRepository.softDelete(visitor.getVisitorId(), id)) {
+        if (!garageVehicleRepository.deleteVehicleAndAllData(currentUser.getUserId(), id)) {
             throw new NotFoundException("Garage vehicle not found");
         }
     }

@@ -1,11 +1,72 @@
 # Implementation status
 
-Last updated: 2026-09-14 (post-launch QA/correctness pass on the
-motorcycle vertical slice). Working log, not a changelog — describes what
-is actually verified right now. Everything below the "Repair V2
-motorcycle pivot" section is the car prototype's own history, preserved
-as-is (that prototype is a preserved historical checkpoint, not deleted —
-see CLAUDE.md and `docs/repair-v2-current-state.md`).
+Last updated: 2026-09-15 (productization pass — Google auth, ownership
+migration, landing redesign; see below). Working log, not a changelog —
+describes what is actually verified right now. Everything below the
+"Repair V2 motorcycle pivot" section is the car prototype's own history,
+preserved as-is (that prototype is a preserved historical checkpoint, not
+deleted — see CLAUDE.md and `docs/repair-v2-current-state.md`).
+
+## Productization pass — Google auth, ownership migration, landing (2026-09-15)
+
+Full write-up: `docs/authentication.md`. Summary:
+
+- **Google-only OAuth2/OIDC login**, backend-owned (Spring Security,
+  endpoints kept under `/api/**` so the existing Next.js rewrite proxy
+  covers the whole login dance). Identity key is the OIDC `sub`
+  (`app_users.google_sub`), never email. New Flyway `V8` migration adds
+  `app_users` and nullable `user_id` ownership columns to
+  `garage_vehicles`/`moto_chat_sessions`, alongside (not replacing) the
+  preserved anonymous `visitor_id` used by the car prototype.
+- **Ownership migrated** from anonymous `visitor_id` (UUID) to real
+  `user_id` (long) across the `garage` and `motochat` packages —
+  repositories bake `user_id` into every query's `WHERE` clause; no
+  method reads/writes by id alone. Cross-user isolation covered by
+  `GarageVehicleRepositoryIT`.
+- **Auth-gated**: `/api/garage/**`, `/api/moto-sessions/**`,
+  `/api/moto-rag-runs/**`, `/api/me*`. The landing page and its dynamic
+  bike picker stay public; picking a bike while signed out preserves the
+  selection (`localStorage`) across the login round trip and auto-creates
+  the garage vehicle + conversation once signed in.
+- **CSRF**: cookie-to-header (`XSRF-TOKEN` → `X-XSRF-TOKEN`), fixed to use
+  the plain `CsrfTokenRequestAttributeHandler` (Spring Security 6's
+  default `XorCsrfTokenRequestAttributeHandler` rejects a raw cookie value
+  echoed back verbatim by a JS SPA — found via live browser testing, not
+  by the test suite, which only asserted the cookie's presence and that a
+  *missing* header was rejected — `SecurityConfigIT` should eventually
+  gain a positive "valid header succeeds" case).
+- **Helmet avatars**: 10-key backend allow-list
+  (`HelmetAvatarCatalog`), never a stored path/URL; frontend falls back to
+  an initial-in-a-circle until real images are dropped into
+  `apps/web/public/avatars/helmets/` (see its `ASSETS.md`).
+- **Landing page redesigned** (hero, features, how-it-works, three
+  editorial "story" sections, a non-functional "From the garage" card
+  grid) — copy is original, written for this pass; no verbatim spec text
+  was available to reuse. Logo was **not** redesigned from scratch — the
+  existing abstract mark was kept and just consolidated across nav/
+  footer/favicon/avatar-fallback use, a deliberate scope trade-off (see
+  final report in the session transcript for the reasoning).
+- **Dev-only test auth**: `DevLoginController`, gated by
+  `@Profile("dev")` (not a property — the bean doesn't exist unless
+  `SPRING_PROFILES_ACTIVE=dev`), lets the authenticated flow be manually
+  QA'd and reproduced in Playwright without a real Google account.
+- **New dev-only cleanup script** (`scripts/clear-demo-data.sh`) clears
+  demo Garage/conversation data — dry-run by default, requires both
+  `--yes` and an exact `--confirm CLEAR-REPAIR-DEMO-DATA` phrase, and a
+  safety guard (`scripts/lib/db-safety-guard.sh`, unit-tested in
+  `clear-demo-data.guard.test.sh`) refuses to run against anything but
+  `repair_v2` on `localhost`/`127.0.0.1`, hard-blocking `repair_db` and
+  anything "prod"-looking. (This exists *because* an earlier draft of the
+  script was run against the real local dev DB during this same pass and
+  wiped its accumulated demo data — a mistake, disclosed to and accepted
+  by the project owner, who asked for exactly these guards afterward.)
+- **Regression**: 115/115 Java tests, 50/50 Python tests, clean `tsc`,
+  clean `next build`, new `auth-gating.spec.ts` Playwright suite 6/6.
+  10 pre-existing Playwright failures in `golden-path.spec.ts` /
+  `layout-and-catalogue.spec.ts` are unrelated — those files test the
+  pre-motorcycle-pivot car-only landing page and were last touched before
+  the pivot itself; not modified or caused by this pass.
+- Left uncommitted for manual review, per instruction.
 
 ## QA / correctness pass on the motorcycle vertical slice (2026-09-14)
 

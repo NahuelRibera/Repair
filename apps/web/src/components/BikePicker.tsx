@@ -68,6 +68,10 @@ export function BikePicker({ onSelected, submitLabel = "Choose this bike →" }:
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-muted leading-relaxed">
+        <span className="font-semibold">Starting with Yamaha.</span> Repair is built to grow with more manufacturers, models and years.
+        The same system is designed to scale as more bike data is added.
+      </p>
       <Combobox
         label="Manufacturer"
         placeholder="Select manufacturer"

@@ -20,6 +20,7 @@ const STATUS_STYLES: Record<MaintenanceStatus, { label: string; className: strin
   OVERDUE: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
   INTERVAL_KNOWN_NO_HISTORY: { label: "Interval known", className: "bg-blue-50 text-blue-700 border-blue-200" },
   UNKNOWN: { label: "Unknown", className: "bg-gray-100 text-gray-600 border-gray-300" },
+  DATA_INCONSISTENT: { label: "Check data", className: "bg-red-50 text-red-700 border-red-200" },
 };
 
 export default function GarageVehiclePage() {
@@ -48,7 +49,17 @@ export default function GarageVehiclePage() {
         setHistory(h);
         setOdometerDraft(v.currentOdometerKm != null ? String(Math.round(v.currentOdometerKm)) : "");
       })
-      .catch((e: unknown) => setLoadError(e instanceof ApiError ? e.message : "Failed to load this bike"));
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 404) {
+          // The bike no longer exists (e.g. deleted from My Garage in
+          // another tab, or this link is stale) — there's nothing useful
+          // to show here, so send the rider back to the garage list
+          // instead of leaving them on a dead/error page.
+          router.replace("/garage");
+          return;
+        }
+        setLoadError(e instanceof ApiError ? e.message : "Failed to load this bike");
+      });
   }
 
   useEffect(refresh, [id]);
@@ -199,7 +210,17 @@ function StatusCardView({ card }: { card: MaintenanceStatusCard }) {
         </span>
       </div>
       {card.status === "UNKNOWN" ? (
-        <p className="text-xs text-muted">{card.note ?? "Not enough data yet"}</p>
+        <div className="text-xs text-muted space-y-0.5">
+          <p>{card.note ?? "Not enough data yet"}</p>
+          {/* UNKNOWN means "no verified interval for this service" — it does NOT mean
+              "no history". A completed service (e.g. a tire replacement, which has no
+              fixed interval) is still real maintenance history and must stay visible
+              here; only the interval/due-date calculation is unavailable. */}
+          {card.lastOdometerKm != null && <p>Last: {Math.round(card.lastOdometerKm).toLocaleString()} km</p>}
+          {card.lastPerformedAt && <p>On: {card.lastPerformedAt}</p>}
+        </div>
+      ) : card.status === "DATA_INCONSISTENT" ? (
+        <p className="text-xs text-red-700">{card.note}</p>
       ) : card.status === "INTERVAL_KNOWN_NO_HISTORY" ? (
         <div className="text-xs text-muted space-y-0.5">
           {card.intervalKm != null && <p>Interval: every {Math.round(card.intervalKm).toLocaleString()} km</p>}

@@ -49,11 +49,26 @@ final class MotoDiagnosticResponseSchema {
         proposedMaintenanceEventProps.put("performedAt", nullableString);
         proposedMaintenanceEventProps.put("notes", nullableString);
         proposedMaintenanceEventProps.put("intent", intentEnum);
-        Map<String, Object> proposedMaintenanceEvent = Map.of(
-                "type", List.of("object", "null"),
+        // True only when this proposal corrects a value already stated earlier in
+        // this same conversation for the same service type — never true for a
+        // genuinely new, separate occurrence. See MotoDiagnosticAnswer.ProposedMaintenanceEvent.
+        proposedMaintenanceEventProps.put("isCorrection", Map.of("type", "boolean"));
+        Map<String, Object> proposedMaintenanceEventItem = Map.of(
+                "type", "object",
                 "additionalProperties", false,
                 "required", List.copyOf(proposedMaintenanceEventProps.keySet()),
                 "properties", proposedMaintenanceEventProps
+        );
+        // A LIST, never a single nullable object: a rider can confirm more
+        // than one distinct maintenance action in one message ("I changed
+        // the oil and oil filter at 24,000 km") and every independently
+        // confirmed action needs its own entry. An empty array means
+        // nothing was proposed this turn. maxItems is a sane ceiling, not
+        // a realistic expectation — nothing in this app asks for more.
+        Map<String, Object> proposedMaintenanceEvents = Map.of(
+                "type", "array",
+                "items", proposedMaintenanceEventItem,
+                "maxItems", 6
         );
 
         Map<String, Object> proposedOdometerUpdateProps = new LinkedHashMap<>();
@@ -90,7 +105,7 @@ final class MotoDiagnosticResponseSchema {
         properties.put("safeChecks", stringArray);
         properties.put("cautions", stringArray);
         properties.put("sourceChunkIds", integerArray);
-        properties.put("proposedMaintenanceEvent", proposedMaintenanceEvent);
+        properties.put("proposedMaintenanceEvents", proposedMaintenanceEvents);
         properties.put("proposedOdometerUpdate", proposedOdometerUpdate);
         properties.put("proposedPreference", proposedPreference);
 

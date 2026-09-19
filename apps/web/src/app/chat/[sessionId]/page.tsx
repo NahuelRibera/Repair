@@ -9,6 +9,7 @@ import type { ActionTaken, MotoChatTurnResult, MotoEvidenceCard, MotoMessage, Mo
 import { MotoAnswerCard } from "@/components/MotoAnswerCard";
 import { Composer } from "@/components/Composer";
 import { MotoEvidenceDrawer } from "@/components/MotoEvidenceDrawer";
+import { AssistantAvatar } from "@/components/AssistantAvatar";
 
 interface TurnExtras {
   evidence: MotoEvidenceCard[];
@@ -174,7 +175,6 @@ function ConversationView({ sessionId }: { sessionId: number }) {
               message={message}
               extras={turnExtras[message.id]}
               onOpenEvidence={() => setDrawerFor(message.id)}
-              onFollowUpClick={(q) => sendMessage(q)}
             />
           ))}
           {sending && (
@@ -209,12 +209,10 @@ function MessageBubble({
   message,
   extras,
   onOpenEvidence,
-  onFollowUpClick,
 }: {
   message: MotoMessage;
   extras?: TurnExtras;
   onOpenEvidence: () => void;
-  onFollowUpClick: (q: string) => void;
 }) {
   if (message.role === "user") {
     return (
@@ -230,14 +228,7 @@ function MessageBubble({
 
   return (
     <div className="flex gap-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-navy text-white shrink-0 mt-0.5">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M21.7 16.3l-4-4a5 5 0 0 0-6.2-6.2L8.4 9.2 4.9 5.7 2.3 8.3l3.5 3.5-3.1 3.1a5 5 0 0 0 6.2 6.2l4-4 4 4 4.8-4.8zM8 20a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"
-            fill="currentColor"
-          />
-        </svg>
-      </div>
+      <AssistantAvatar size={32} className="mt-0.5" />
       <div className="flex-1 min-w-0 rounded-2xl rounded-tl-sm border border-border bg-panel px-4 py-3.5">
         {parsed ? (
           <MotoAnswerCard
@@ -245,7 +236,6 @@ function MessageBubble({
             evidence={extras?.evidence ?? []}
             actionsTaken={extras?.actionsTaken ?? []}
             onOpenEvidence={onOpenEvidence}
-            onFollowUpClick={onFollowUpClick}
           />
         ) : (
           <p className="text-sm leading-relaxed">{message.content}</p>

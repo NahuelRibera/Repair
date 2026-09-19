@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { bikeTitle } from "@/lib/types";
 import type { GarageVehicle, MotoSessionDetail } from "@/lib/types";
 import { BikePicker } from "@/components/BikePicker";
+import { takePendingBikeSelection } from "@/lib/pendingBikeSelection";
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -13,6 +14,7 @@ export default function NewChatPage() {
   const [addingBike, setAddingBike] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const consumedPendingSelection = useRef(false);
 
   useEffect(() => {
     api
@@ -20,6 +22,20 @@ export default function NewChatPage() {
       .then(setGarage)
       .catch(() => setGarage([]));
   }, []);
+
+  // The bike a visitor picked on the public landing page before being
+  // sent to sign in (see LandingPicker) — consumed exactly once, the
+  // first time this page renders as an authenticated user, then acted on
+  // automatically so the rider doesn't have to re-pick it.
+  useEffect(() => {
+    if (garage === null || consumedPendingSelection.current) return;
+    consumedPendingSelection.current = true;
+    const pending = takePendingBikeSelection();
+    if (pending) {
+      addBikeAndStart(pending.modelId, pending.year);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [garage]);
 
   async function startWithGarageVehicle(garageVehicleId: number) {
     setStarting(true);
@@ -69,7 +85,7 @@ export default function NewChatPage() {
         </h1>
         <p className="text-muted text-center mb-8">
           {showPicker
-            ? "Manufacturer, model and year — Repair uses only verified knowledge for this exact bike."
+            ? "Manufacturer, model and year. Repair uses only verified knowledge for this exact bike."
             : "Pick a bike from your garage to start, or add another one."}
         </p>
 

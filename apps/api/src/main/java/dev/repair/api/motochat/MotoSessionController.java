@@ -2,7 +2,7 @@ package dev.repair.api.motochat;
 
 import dev.repair.api.common.BadRequestException;
 import dev.repair.api.common.NotFoundException;
-import dev.repair.api.common.VisitorContext;
+import dev.repair.api.auth.AuthenticatedUserContext;
 import dev.repair.api.garage.GarageVehicleRepository;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -20,44 +20,44 @@ public class MotoSessionController {
 
     private final MotoChatSessionRepository sessionRepository;
     private final GarageVehicleRepository garageVehicleRepository;
-    private final VisitorContext visitor;
+    private final AuthenticatedUserContext currentUser;
 
     public MotoSessionController(
-            MotoChatSessionRepository sessionRepository, GarageVehicleRepository garageVehicleRepository, VisitorContext visitor
+            MotoChatSessionRepository sessionRepository, GarageVehicleRepository garageVehicleRepository, AuthenticatedUserContext currentUser
     ) {
         this.sessionRepository = sessionRepository;
         this.garageVehicleRepository = garageVehicleRepository;
-        this.visitor = visitor;
+        this.currentUser = currentUser;
     }
 
     @PostMapping("/api/moto-sessions")
     @ResponseStatus(HttpStatus.CREATED)
     public MotoSessionDetailDto createSession(@Valid @RequestBody CreateMotoSessionRequest request) {
-        var vehicle = garageVehicleRepository.find(visitor.getVisitorId(), request.garageVehicleId())
+        var vehicle = garageVehicleRepository.find(currentUser.getUserId(), request.garageVehicleId())
                 .orElseThrow(() -> new BadRequestException("Unknown garage vehicle"));
         String title = vehicle.nickname() != null && !vehicle.nickname().isBlank()
                 ? vehicle.nickname()
                 : vehicle.manufacturerName() + " " + vehicle.modelName();
-        long sessionId = sessionRepository.createSession(visitor.getVisitorId(), request.garageVehicleId(), title);
-        return sessionRepository.findSessionDetail(visitor.getVisitorId(), sessionId)
+        long sessionId = sessionRepository.createSession(currentUser.getUserId(), request.garageVehicleId(), title);
+        return sessionRepository.findSessionDetail(currentUser.getUserId(), sessionId)
                 .orElseThrow(() -> new IllegalStateException("Session vanished immediately after creation"));
     }
 
     @GetMapping("/api/moto-sessions")
     public List<MotoSessionSummaryDto> listSessions() {
-        return sessionRepository.listSessions(visitor.getVisitorId());
+        return sessionRepository.listSessions(currentUser.getUserId());
     }
 
     @GetMapping("/api/moto-sessions/{sessionId}")
     public MotoSessionDetailDto sessionDetail(@PathVariable long sessionId) {
-        return sessionRepository.findSessionDetail(visitor.getVisitorId(), sessionId)
+        return sessionRepository.findSessionDetail(currentUser.getUserId(), sessionId)
                 .orElseThrow(() -> new NotFoundException("Conversation not found"));
     }
 
     @DeleteMapping("/api/moto-sessions/{sessionId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteSession(@PathVariable long sessionId) {
-        if (!sessionRepository.softDelete(visitor.getVisitorId(), sessionId)) {
+        if (!sessionRepository.softDelete(currentUser.getUserId(), sessionId)) {
             throw new NotFoundException("Conversation not found");
         }
     }

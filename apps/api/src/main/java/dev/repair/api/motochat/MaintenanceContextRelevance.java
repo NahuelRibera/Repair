@@ -24,7 +24,7 @@ final class MaintenanceContextRelevance {
 
     private static final Map<String, List<String>> SERVICE_TYPE_KEYWORDS = Map.ofEntries(
             Map.entry("ENGINE_OIL_CHANGE", List.of("oil")),
-            Map.entry("OIL_FILTER_CHANGE", List.of("oil filter", "filter")),
+            Map.entry("OIL_FILTER_CHANGE", List.of("oil filter")),
             Map.entry("SPARK_PLUG_CHANGE", List.of("spark plug", "plug")),
             Map.entry("AIR_FILTER_CHANGE", List.of("air filter")),
             Map.entry("VALVE_CLEARANCE_CHECK", List.of("valve")),

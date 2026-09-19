@@ -58,7 +58,7 @@ public class MaintenanceStatusService {
      * know the interval, we just don't have a recorded previous service
      * to measure from" — the dashboard renders these very differently.
      */
-    public enum Status { UNKNOWN, INTERVAL_KNOWN_NO_HISTORY, OK, DUE_SOON, DUE, OVERDUE }
+    public enum Status { UNKNOWN, INTERVAL_KNOWN_NO_HISTORY, OK, DUE_SOON, DUE, OVERDUE, DATA_INCONSISTENT }
 
     public record StatusCard(
             String serviceType, Status status, Double lastOdometerKm, LocalDate lastPerformedAt,
@@ -94,6 +94,21 @@ public class MaintenanceStatusService {
             return new StatusCard(serviceType, Status.UNKNOWN, lastEvent == null ? null : lastEvent.odometerKm(),
                     lastEvent == null ? null : lastEvent.performedAt(), null, null, null, null,
                     "No verified interval for this service on this bike");
+        }
+
+        if (lastEvent != null && lastEvent.odometerKm() != null && vehicle.currentOdometerKm() != null
+                && lastEvent.odometerKm() > vehicle.currentOdometerKm()) {
+            // Impossible history: a recorded service at a higher mileage than
+            // the bike's current odometer — almost always stale/incorrect
+            // data (an odometer correction after the fact, a typo, or dirty
+            // data from an earlier, buggier version of the app). Never
+            // silently compute a "remaining" figure from this — that would
+            // produce a confidently wrong answer. Surface it plainly instead
+            // and let the rider fix whichever value is wrong.
+            return new StatusCard(serviceType, Status.DATA_INCONSISTENT, lastEvent.odometerKm(), lastEvent.performedAt(),
+                    intervalKm, null, intervalMonths, null,
+                    "Recorded service at " + formatKm(lastEvent.odometerKm()) + " km is higher than the current "
+                            + "odometer (" + formatKm(vehicle.currentOdometerKm()) + " km). Check one of these values.");
         }
 
         if (lastEvent == null) {
@@ -165,6 +180,10 @@ public class MaintenanceStatusService {
         if (a.status == Status.UNKNOWN) return b;
         if (b.status == Status.UNKNOWN) return a;
         return a.status.ordinal() >= b.status.ordinal() ? a : b;
+    }
+
+    private static String formatKm(double value) {
+        return value == Math.floor(value) ? String.valueOf((long) value) : String.valueOf(value);
     }
 
     private Double factNumeric(Map<String, MotorcycleFactDto> facts, String factType) {

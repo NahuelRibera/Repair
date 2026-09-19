@@ -6,11 +6,17 @@ import java.util.List;
  * The structured contract every motorcycle-assistant turn conforms to
  * (strict JSON-schema validated by OpenAI, then re-validated server-side —
  * see MotoChatOrchestrationService.validateCitations and
- * .validateProposedActions). The three "proposed*" fields are the
+ * .validateProposedActions). The "proposed*" fields are the
  * controlled-action surface described in
  * docs/repair-v2-architecture.md section 5: the model may propose a
  * write, but every proposal is validated and executed by the backend —
  * never by model-generated SQL, and never persisted when null/absent.
+ *
+ * proposedMaintenanceEvents is a LIST (never a single nullable object):
+ * a rider can confirm more than one distinct maintenance action in one
+ * message ("I changed the oil and oil filter at 24,000 km") and every
+ * independently confirmed action gets its own entry — never collapsed
+ * into one, never silently dropped because a slot was already used.
  */
 public record MotoDiagnosticAnswer(
         String answerType, // clarification | guidance | insufficient_evidence | safety_referral
@@ -21,7 +27,7 @@ public record MotoDiagnosticAnswer(
         List<String> safeChecks,
         List<String> cautions,
         List<Long> sourceChunkIds,
-        ProposedMaintenanceEvent proposedMaintenanceEvent,
+        List<ProposedMaintenanceEvent> proposedMaintenanceEvents,
         ProposedOdometerUpdate proposedOdometerUpdate,
         ProposedPreference proposedPreference
 ) {
@@ -34,9 +40,20 @@ public record MotoDiagnosticAnswer(
      * positive maintenance write" class of bug: a hypothetical, uncertain,
      * planned, or merely-asked-about mileage/service must never be
      * persisted, no matter how the model phrases its summary.
+     *
+     * {@code isCorrection}: true when the rider is amending/correcting a
+     * value they (or the assistant, echoing them) already stated earlier
+     * in THIS conversation for the same service type — never true for a
+     * genuinely new, separate occurrence of that service. When true, the
+     * backend updates the most recently recorded event of this service
+     * type in place rather than inserting a second, conflicting row (see
+     * MotoChatOrchestrationService.validateAndApplyProposedActions and
+     * MaintenanceRepository.correctLatestEvent) — this is the fix for the
+     * "correction creates a second event instead of replacing the first"
+     * class of bug.
      */
     public record ProposedMaintenanceEvent(
-            String serviceType, Double odometerKm, String performedAt, String notes, String intent
+            String serviceType, Double odometerKm, String performedAt, String notes, String intent, boolean isCorrection
     ) {
     }
 

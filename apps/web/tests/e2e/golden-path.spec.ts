@@ -1,52 +1,81 @@
 import { expect, Page, test } from "@playwright/test";
+import { devLogin, uniqueSub } from "./dev-auth";
 
 /**
- * End-to-end golden path against the real Next.js app and the real Java
- * API (see playwright.config.ts) for everything except the chat turn
- * itself, which is stubbed at the browser network layer (see
- * stubInsufficientEvidenceTurn below). This test verifies the full
- * catalogue -> session -> chat -> persistence path, not the OpenAI
- * integration itself (that's covered by mocked Java unit tests instead).
+ * REWRITTEN for the motorcycle product and its Google-auth productization
+ * pass (2026-09-15). The original version of this file tested the
+ * car-prototype's frontend flow (a "Select manufacturer" catalogue picker
+ * over BMW/Toyota/etc., an anonymous `repair_visitor` cookie for
+ * ownership, a landing hero reading "AI-assisted diagnosis for real
+ * cars…") — none of that UI is reachable anymore. The car pivot itself
+ * happened in an earlier session (see `docs/repair-v2-current-state.md`);
+ * the car frontend components it left behind (`VehiclePicker.tsx`,
+ * `AnswerCard.tsx`, `EvidenceDrawer.tsx`) are dead code, imported by no
+ * route. This file now exercises the *same underlying behaviors* —
+ * picking a vehicle, sending a message, reload persistence, ownership
+ * isolation, mobile layout — against the real motorcycle product.
  *
- * The stub exists so this test's cost and outcome never depend on whether
- * a local .env happens to carry a real OPENAI_API_KEY: without it, this
- * would either make a real, billed OpenAI call (if a key is configured)
- * or silently assert on the "AI not configured" fallback text (if not) —
- * neither of which this suite should require to verify the persistence
- * path.
+ * Auth is real, not mocked: `devLogin` (see ./dev-auth.ts) signs in via
+ * the manual-QA-only DevLoginController, which requires the Java API to
+ * be running with `SPRING_PROFILES_ACTIVE=dev` (see playwright.config.ts
+ * and docs/authentication.md). Vehicle/session creation hits the real
+ * backend and a real local Postgres row — only the actual chat-turn
+ * network call is stubbed, for the same reason the original file stubbed
+ * it: this repo's local `.env` carries a real, billable OPENAI_API_KEY,
+ * and this suite's cost and outcome must never depend on that.
  */
 
-const STUBBED_ANSWER = {
-  answerType: "insufficient_evidence",
-  summary:
-    "OpenAI is not configured on this server (OPENAI_API_KEY is unset), so I can't run a live " +
-    "diagnosis right now. The vehicle catalogue and data-quality views still work without it.",
-  confirmedSymptoms: [],
-  followUpQuestions: [],
-  hypotheses: [],
-  safeChecks: [],
-  cautions: [],
-  missingInformation: [],
-  sourceChunkIds: [],
+type StubbedAnswer = {
+  answerType: string;
+  summary: string;
+  confirmedFacts: string[];
+  contextUsed: string[];
+  followUpQuestions: string[];
+  safeChecks: string[];
+  cautions: string[];
+  sourceChunkIds: number[];
+  proposedMaintenanceEvents: never[];
+  proposedOdometerUpdate: null;
+  proposedPreference: null;
 };
 
-/**
- * Intercepts the chat-turn network calls for one session so no request
- * ever reaches the Java backend (and therefore never reaches OpenAI),
- * regardless of local .env configuration. Must be registered after the
- * session exists (its id is in the URL) and before the composer is used.
- */
-async function stubInsufficientEvidenceTurn(page: Page, sessionId: string, userText: string) {
+const STUBBED_ANSWER: StubbedAnswer = {
+  answerType: "insufficient_evidence",
+  summary: "Stubbed test response — the real chat-turn call is never made by this suite.",
+  confirmedFacts: [],
+  contextUsed: [],
+  followUpQuestions: [],
+  safeChecks: [],
+  cautions: [],
+  sourceChunkIds: [],
+  proposedMaintenanceEvents: [],
+  proposedOdometerUpdate: null,
+  proposedPreference: null,
+};
+
+async function stubChatTurn(
+  page: Page,
+  sessionId: string,
+  userText: string,
+  session: { manufacturerName: string; modelName: string; year: number },
+  answerOverride: StubbedAnswer = STUBBED_ANSWER
+) {
   const createdAt = new Date().toISOString();
-  await page.route(`**/api/sessions/${sessionId}/messages`, (route) =>
-    route.fulfill({
+  let messageCount = 0;
+  await page.route(`**/api/moto-sessions/${sessionId}/messages`, (route) => {
+    messageCount += 1;
+    return route.fulfill({
       json: {
         messageId: 999001,
-        answer: STUBBED_ANSWER,
+        answer: answerOverride,
         evidence: [],
+        actionsTaken: [],
         debug: {
           requestId: "00000000-0000-0000-0000-000000000000",
-          variantId: 23079,
+          garageVehicleId: 0,
+          manufacturerName: session.manufacturerName,
+          modelName: session.modelName,
+          year: session.year,
           embeddingModel: null,
           generationModel: null,
           promptTokens: null,
@@ -55,21 +84,22 @@ async function stubInsufficientEvidenceTurn(page: Page, sessionId: string, userT
           generationMillis: null,
           providerStatus: "missing_key",
           errorDetail: null,
+          actionsTakenJson: "[]",
         },
       },
-    })
-  );
-  await page.route(`**/api/sessions/${sessionId}`, (route) => {
+    });
+  });
+  await page.route(`**/api/moto-sessions/${sessionId}`, (route) => {
     if (route.request().method() !== "GET") return route.continue();
     route.fulfill({
       json: {
         session: {
           id: Number(sessionId),
-          title: "BMW 3 Series Sedan",
-          variantId: 23079,
-          manufacturerName: "BMW",
-          modelName: "BMW 3 Series Sedan",
-          variantName: "BMW 3 Series (E90) 320d 6MT RWD (177 HP)",
+          title: null,
+          garageVehicleId: 0,
+          manufacturerName: session.manufacturerName,
+          modelName: session.modelName,
+          year: session.year,
           createdAt,
           updatedAt: createdAt,
         },
@@ -78,78 +108,123 @@ async function stubInsufficientEvidenceTurn(page: Page, sessionId: string, userT
           {
             id: 999001,
             role: "assistant",
-            content: STUBBED_ANSWER.summary,
-            structuredResponseJson: JSON.stringify(STUBBED_ANSWER),
+            content: answerOverride.summary,
+            structuredResponseJson: JSON.stringify(answerOverride),
             createdAt,
           },
         ],
       },
     });
   });
+  return () => messageCount;
 }
 
-test.describe("golden path: select vehicle, chat, reload", () => {
-  test("select BMW 3 Series (E90) 320d, send a message, and recover it after reload", async ({ page }) => {
+/** Picks the first available Yamaha model/year through the real public
+ * catalogue — no mocking, this data really exists in the seeded
+ * knowledge base. */
+async function pickAYamahaBike(page: Page, modelSearch: string) {
+  await page.getByRole("button", { name: "Select manufacturer" }).click();
+  await page.getByPlaceholder("Type to search, or browse below…").fill("Yamaha");
+  await page.getByRole("option", { name: "Yamaha", exact: true }).click();
+
+  await page.getByRole("button", { name: "Select model" }).click();
+  await page.getByPlaceholder("Type to search, or browse below…").fill(modelSearch);
+  await page.getByRole("option", { name: modelSearch, exact: true }).click();
+
+  const yearSelect = page.getByLabel("Year");
+  await expect(async () => {
+    const opts = await yearSelect.locator("option").allTextContents();
+    expect(opts.some((y) => /^\d{4}$/.test(y.trim()))).toBe(true);
+  }).toPass({ timeout: 10_000 });
+  const opts = await yearSelect.locator("option").allTextContents();
+  const year = opts.find((y) => /^\d{4}$/.test(y.trim()))!.trim();
+  await yearSelect.selectOption({ label: year });
+  return Number(year);
+}
+
+test.describe("golden path: select a bike, chat, reload", () => {
+  test("send a message and recover it after reload", async ({ page }) => {
+    await devLogin(page, uniqueSub("golden-a"), "golden-a@example.test", "Golden Rider A");
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /AI-assisted diagnosis for real cars/i })).toBeVisible();
 
-    await page.getByRole("link", { name: "Start a diagnosis →" }).first().click();
-    await expect(page).toHaveURL(/\/chat$/);
-
-    await page.getByRole("button", { name: "Select manufacturer" }).click();
-    await page.getByPlaceholder("Type to search, or browse below…").fill("BMW");
-    await page.getByRole("option", { name: "BMW", exact: true }).click();
-
-    await page.getByRole("button", { name: "Choose a manufacturer first" }).or(page.getByRole("button", { name: "Select model" })).click();
-    await page.getByPlaceholder("Type to search, or browse below…").fill("3 Series Sedan");
-    await page.getByRole("option", { name: "BMW 3 Series Sedan" }).click();
-
-    await page.getByLabel("Year").selectOption({ label: "2008" });
-    await page.getByLabel("Motorization").selectOption({ label: "BMW 3 Series (E90) 320d 6MT RWD (177 HP)" });
-
-    await page.getByRole("button", { name: "Start a diagnosis →" }).click();
+    const year = await pickAYamahaBike(page, "MT-07");
+    await page.getByRole("button", { name: "Start with this bike →" }).click();
     await expect(page).toHaveURL(/\/chat\/\d+$/);
     const sessionId = page.url().match(/\/chat\/(\d+)$/)![1];
-    const conversationHeader = page.getByRole("banner");
-    await expect(conversationHeader.getByText("BMW 3 Series Sedan")).toBeVisible();
-    await expect(conversationHeader.getByText("BMW 3 Series (E90) 320d 6MT RWD (177 HP)")).toBeVisible();
 
-    const userText = "The driver's side window will not go up anymore.";
-    await stubInsufficientEvidenceTurn(page, sessionId, userText);
-    const composer = page.getByPlaceholder("Describe the symptom in detail…");
+    const header = page.getByRole("banner");
+    await expect(header.getByText("Yamaha MT-07")).toBeVisible();
+    await expect(header.getByText(String(year))).toBeVisible();
+
+    const userText = "The clutch feels grabby right at the start of engagement.";
+    await stubChatTurn(page, sessionId, userText, { manufacturerName: "Yamaha", modelName: "MT-07", year });
+    const composer = page.getByPlaceholder("Ask about maintenance, or describe what's happening…");
     await composer.fill(userText);
     await composer.press("Enter");
 
-    await expect(page.getByText("The driver's side window will not go up anymore.")).toBeVisible();
-    await expect(page.getByText(/insufficient evidence/i)).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText(/OpenAI is not configured/i)).toBeVisible();
+    await expect(page.getByText(userText)).toBeVisible();
+    await expect(page.getByText(STUBBED_ANSWER.summary)).toBeVisible({ timeout: 10_000 });
 
     const url = page.url();
     await page.reload();
     await expect(page).toHaveURL(url);
-    await expect(page.getByText("The driver's side window will not go up anymore.")).toBeVisible();
-    await expect(page.getByText(/OpenAI is not configured/i)).toBeVisible();
+    await expect(page.getByText(userText)).toBeVisible();
+    await expect(page.getByText(STUBBED_ANSWER.summary)).toBeVisible();
+  });
+});
+
+test.describe("follow-up questions are plain, non-interactive text", () => {
+  test("suggested follow-ups render as text, not clickable buttons, and cannot submit a message", async ({ page }) => {
+    await devLogin(page, uniqueSub("followup"), "followup@example.test", "Followup Rider");
+    await page.goto("/");
+
+    const year = await pickAYamahaBike(page, "MT-07");
+    await page.getByRole("button", { name: "Start with this bike →" }).click();
+    await expect(page).toHaveURL(/\/chat\/\d+$/);
+    const sessionId = page.url().match(/\/chat\/(\d+)$/)![1];
+
+    const followUpQuestions = [
+      "Do you regularly check your chain slack between lubrications?",
+      "Have you noticed unusual chain noise?",
+    ];
+    const userText = "I lubricated the chain today.";
+    const getMessageCount = await stubChatTurn(page, sessionId, userText, { manufacturerName: "Yamaha", modelName: "MT-07", year }, {
+      ...STUBBED_ANSWER,
+      followUpQuestions,
+    });
+    const composer = page.getByPlaceholder("Ask about maintenance, or describe what's happening…");
+    await composer.fill(userText);
+    await composer.press("Enter");
+
+    await expect(page.getByText(STUBBED_ANSWER.summary)).toBeVisible({ timeout: 10_000 });
+    for (const question of followUpQuestions) {
+      await expect(page.getByText(question)).toBeVisible();
+      // Must not be exposed as an interactive control of any kind.
+      await expect(page.getByRole("button", { name: question })).toHaveCount(0);
+      await expect(page.getByRole("link", { name: question })).toHaveCount(0);
+    }
+
+    expect(getMessageCount()).toBe(1);
+    await page.getByText(followUpQuestions[0]).click();
+    // A plain click on the suggestion text must never submit a new chat
+    // message — the rider must type their own response in the composer.
+    await expect(composer).toHaveValue("");
+    expect(getMessageCount()).toBe(1);
   });
 });
 
 test.describe("conversation ownership isolation", () => {
-  test("a different anonymous visitor cannot open someone else's conversation", async ({ page, browser }) => {
-    await page.goto("/chat");
-    await page.getByRole("button", { name: "Select manufacturer" }).click();
-    await page.getByPlaceholder("Type to search, or browse below…").fill("BMW");
-    await page.getByRole("option", { name: "BMW", exact: true }).click();
-    await page.getByRole("button", { name: "Select model" }).click();
-    await page.getByPlaceholder("Type to search, or browse below…").fill("3 Series Sedan");
-    await page.getByRole("option", { name: "BMW 3 Series Sedan" }).click();
-    await page.getByLabel("Year").selectOption({ label: "2008" });
-    await page.getByLabel("Motorization").selectOption({ label: "BMW 3 Series (E90) 320d 6MT RWD (177 HP)" });
-    await page.getByRole("button", { name: "Start a diagnosis →" }).click();
+  test("a different signed-in rider cannot open someone else's conversation", async ({ page, browser }) => {
+    await devLogin(page, uniqueSub("owner"), "owner@example.test", "Owner Rider");
+    await page.goto("/");
+    await pickAYamahaBike(page, "MT-09");
+    await page.getByRole("button", { name: "Start with this bike →" }).click();
     await expect(page).toHaveURL(/\/chat\/\d+$/);
     const sessionUrl = page.url();
 
-    // A brand-new browser context has no visitor cookie at all.
     const strangerContext = await browser.newContext();
     const strangerPage = await strangerContext.newPage();
+    await devLogin(strangerPage, uniqueSub("stranger"), "stranger@example.test", "Stranger Rider");
     await strangerPage.goto(sessionUrl);
     await expect(strangerPage.getByText(/couldn.t load this conversation/i)).toBeVisible();
     await strangerContext.close();
@@ -160,6 +235,7 @@ test.describe("mobile layout", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("sidebar is hidden behind a menu button and opens without horizontal overflow", async ({ page }) => {
+    await devLogin(page, uniqueSub("mobile"), "mobile@example.test", "Mobile Rider");
     await page.goto("/chat");
 
     const menuButton = page.getByRole("button", { name: "Open menu" });

@@ -1,5 +1,10 @@
 import { ChatShell } from "@/components/ChatShell";
+import { RequireAuth } from "@/components/RequireAuth";
 
 export default function ChatLayout({ children }: { children: React.ReactNode }) {
-  return <ChatShell>{children}</ChatShell>;
+  return (
+    <RequireAuth>
+      <ChatShell>{children}</ChatShell>
+    </RequireAuth>
+  );
 }

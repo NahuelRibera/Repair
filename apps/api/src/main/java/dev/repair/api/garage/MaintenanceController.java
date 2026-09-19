@@ -2,7 +2,7 @@ package dev.repair.api.garage;
 
 import dev.repair.api.common.BadRequestException;
 import dev.repair.api.common.NotFoundException;
-import dev.repair.api.common.VisitorContext;
+import dev.repair.api.auth.AuthenticatedUserContext;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -21,26 +21,26 @@ public class MaintenanceController {
     private final MaintenanceRepository maintenanceRepository;
     private final VehiclePreferenceRepository preferenceRepository;
     private final MaintenanceStatusService statusService;
-    private final VisitorContext visitor;
+    private final AuthenticatedUserContext currentUser;
     private final ObjectMapper objectMapper;
 
     public MaintenanceController(
             GarageVehicleRepository garageVehicleRepository, MaintenanceRepository maintenanceRepository,
             VehiclePreferenceRepository preferenceRepository, MaintenanceStatusService statusService,
-            VisitorContext visitor, ObjectMapper objectMapper
+            AuthenticatedUserContext currentUser, ObjectMapper objectMapper
     ) {
         this.garageVehicleRepository = garageVehicleRepository;
         this.maintenanceRepository = maintenanceRepository;
         this.preferenceRepository = preferenceRepository;
         this.statusService = statusService;
-        this.visitor = visitor;
+        this.currentUser = currentUser;
         this.objectMapper = objectMapper;
     }
 
     @GetMapping("/api/garage/vehicles/{id}/maintenance")
     public List<MaintenanceEventDto> listMaintenance(@PathVariable long id) {
         requireOwned(id);
-        return maintenanceRepository.listForOwnedVehicle(visitor.getVisitorId(), id);
+        return maintenanceRepository.listForOwnedVehicle(currentUser.getUserId(), id);
     }
 
     @PostMapping("/api/garage/vehicles/{id}/maintenance")
@@ -59,7 +59,7 @@ public class MaintenanceController {
         long eventId = maintenanceRepository.createEvent(
                 id, request.serviceType(), request.odometerKm(), request.performedAt(), request.notes(), "manual"
         );
-        return maintenanceRepository.listForOwnedVehicle(visitor.getVisitorId(), id).stream()
+        return maintenanceRepository.listForOwnedVehicle(currentUser.getUserId(), id).stream()
                 .filter(e -> e.id() == eventId)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Maintenance event vanished immediately after creation"));
@@ -67,7 +67,7 @@ public class MaintenanceController {
 
     @GetMapping("/api/garage/vehicles/{id}/dashboard")
     public List<MaintenanceStatusService.StatusCard> dashboard(@PathVariable long id) {
-        var vehicle = garageVehicleRepository.find(visitor.getVisitorId(), id)
+        var vehicle = garageVehicleRepository.find(currentUser.getUserId(), id)
                 .orElseThrow(() -> new NotFoundException("Garage vehicle not found"));
         var latestByType = maintenanceRepository.latestEventByType(id);
         return statusService.buildDashboard(vehicle, latestByType);
@@ -76,7 +76,7 @@ public class MaintenanceController {
     @GetMapping("/api/garage/vehicles/{id}/preferences")
     public List<VehiclePreferenceDto> listPreferences(@PathVariable long id) {
         requireOwned(id);
-        return preferenceRepository.listForOwnedVehicle(visitor.getVisitorId(), id);
+        return preferenceRepository.listForOwnedVehicle(currentUser.getUserId(), id);
     }
 
     @PostMapping("/api/garage/vehicles/{id}/preferences")
@@ -95,11 +95,11 @@ public class MaintenanceController {
             throw new BadRequestException("Invalid preference data");
         }
         preferenceRepository.upsert(id, request.preferenceType(), request.context(), dataJson);
-        return preferenceRepository.listForOwnedVehicle(visitor.getVisitorId(), id);
+        return preferenceRepository.listForOwnedVehicle(currentUser.getUserId(), id);
     }
 
     private void requireOwned(long garageVehicleId) {
-        if (!garageVehicleRepository.isOwned(visitor.getVisitorId(), garageVehicleId)) {
+        if (!garageVehicleRepository.isOwned(currentUser.getUserId(), garageVehicleId)) {
             throw new NotFoundException("Garage vehicle not found");
         }
     }

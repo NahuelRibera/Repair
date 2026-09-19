@@ -124,8 +124,7 @@ export function Combobox({
         </svg>
       </button>
       {open && (
-        <div className="absolute z-20 mt-1 w-full rounded-lg border border-border bg-panel shadow-lg overflow-hidden">
-          <input
+<         div className="absolute z-[100] mt-1 w-full rounded-lg border border-border bg-panel shadow-lg overflow-hidden">          <input
             ref={inputRef}
             autoFocus
             role="combobox"

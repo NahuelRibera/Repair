@@ -181,6 +181,37 @@ class MaintenanceStatusServiceTest {
     }
 
     @Test
+    void serviceRecordedAboveCurrentOdometer_isFlaggedInconsistentNotSilentlyCalculated() {
+        // Section 2.6 of the productization pass: a historical event at
+        // 25,000 km with a current odometer of 18,500 km is impossible —
+        // never compute a "remaining" figure from it.
+        when(catalogRepository.findFacts(MODEL_ID, YEAR)).thenReturn(Map.of(
+                "ENGINE_OIL_INTERVAL_KM", new MotorcycleFactDto("ENGINE_OIL_INTERVAL_KM", 6000.0, null, "km")
+        ));
+        var vehicle = vehicle(18500.0);
+        var latest = Map.of("ENGINE_OIL_CHANGE", oilEvent(25000.0, null));
+
+        var card = cardFor("ENGINE_OIL_CHANGE", service.buildDashboard(vehicle, latest));
+
+        assertThat(card.status()).isEqualTo(MaintenanceStatusService.Status.DATA_INCONSISTENT);
+        assertThat(card.remainingKm()).isNull();
+        assertThat(card.note()).contains("25000").contains("18500").contains("Check one of these values");
+    }
+
+    @Test
+    void serviceRecordedAtOrBelowCurrentOdometer_isNotFlaggedInconsistent() {
+        when(catalogRepository.findFacts(MODEL_ID, YEAR)).thenReturn(Map.of(
+                "ENGINE_OIL_INTERVAL_KM", new MotorcycleFactDto("ENGINE_OIL_INTERVAL_KM", 6000.0, null, "km")
+        ));
+        var vehicle = vehicle(25000.0);
+        var latest = Map.of("ENGINE_OIL_CHANGE", oilEvent(19000.0, null));
+
+        var card = cardFor("ENGINE_OIL_CHANGE", service.buildDashboard(vehicle, latest));
+
+        assertThat(card.status()).isNotEqualTo(MaintenanceStatusService.Status.DATA_INCONSISTENT);
+    }
+
+    @Test
     void factMappingMatrix_recognizesEveryExtractedIntervalType() {
         // The dashboard must map every fact type ingestion can actually
         // extract into its corresponding service — see

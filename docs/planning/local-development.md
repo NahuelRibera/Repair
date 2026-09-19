@@ -191,6 +191,37 @@ nohup npm run dev > ../../.logs/web.log 2>&1 &
 disown
 ```
 
+## Clearing demo/QA data (optional, manual only)
+
+`scripts/clear-demo-data.sh` clears Garage vehicles, maintenance events,
+preferences, and conversation history (both the authenticated motorcycle
+domain and the legacy anonymous car-prototype path) from your **local**
+database — never the motorcycle catalog or knowledge base. It is never run
+automatically by anything (no hook, no CI job, no application code path)
+and is deliberately hard to trigger by accident:
+
+```bash
+scripts/clear-demo-data.sh                                        # dry run: prints target + row counts, deletes nothing
+scripts/clear-demo-data.sh --yes                                   # still a dry run — --yes alone is not enough
+scripts/clear-demo-data.sh --yes --confirm CLEAR-REPAIR-DEMO-DATA   # actually deletes
+```
+
+Before doing anything destructive, it also refuses to run at all unless
+the target is unambiguously *this* project's local dev database — see
+`scripts/lib/db-safety-guard.sh`:
+
+- host must be `localhost` or `127.0.0.1` (never a remote or shared host);
+- the database name must be exactly `repair_v2`;
+- it hard-refuses the owner's separate car-prototype database
+  (`repair_db`) and any name that merely contains `prod`.
+
+`scripts/clear-demo-data.guard.test.sh` unit-tests that guard logic (pure
+bash, no database needed):
+
+```bash
+bash scripts/clear-demo-data.guard.test.sh
+```
+
 ## 7. Stopping everything
 
 If you started the API/web app in a terminal tab: `Ctrl+C` there.
@@ -252,14 +283,25 @@ cd apps/api && ./mvnw test
 cd apps/web && npx tsc --noEmit && npm run lint && npm run build
 
 # Web: end-to-end (requires the API + db running; starts its own Next.js
-# dev server automatically). No OPENAI_API_KEY needed — it exercises the
-# API's real "AI not configured" path, not a live model call.
+# dev server automatically). golden-path.spec.ts additionally requires
+# the API running with SPRING_PROFILES_ACTIVE=dev (see below and
+# docs/authentication.md) — every other spec file runs against the
+# API's normal profile. The chat-turn network call is always stubbed,
+# so no real OPENAI_API_KEY spend happens regardless of what's in .env.
+cd apps/api && SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run   # separate terminal
 cd apps/web && npx playwright test
 ```
 
 None of the automated tests call the real OpenAI API. The only thing that
 requires a real `OPENAI_API_KEY` is step 4 (embedding the knowledge corpus)
 and manually exercising a live chat conversation in the browser.
+
+`tests/e2e/golden-path.spec.ts` and the ownership-isolation test within it
+sign in via the real backend using `tests/e2e/dev-auth.ts` (the manual-QA-
+only `DevLoginController`), so they only run correctly against an API
+started with the `dev` profile as shown above — see docs/authentication.md
+"Testing without a Google account". Every other E2E spec mocks
+`/api/me` instead and runs against the API's normal profile.
 
 The motorcycle-specific test files (all offline, no API key needed):
 `pipelines/tests/test_motorcycle_facts.py`,

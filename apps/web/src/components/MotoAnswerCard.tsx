@@ -13,13 +13,11 @@ export function MotoAnswerCard({
   evidence,
   actionsTaken,
   onOpenEvidence,
-  onFollowUpClick,
 }: {
   answer: MotoDiagnosticAnswer;
   evidence: MotoEvidenceCard[];
   actionsTaken: ActionTaken[];
   onOpenEvidence: () => void;
-  onFollowUpClick: (question: string) => void;
 }) {
   const style = ANSWER_TYPE_STYLES[answer.answerType] ?? ANSWER_TYPE_STYLES.insufficient_evidence;
 
@@ -101,16 +99,15 @@ export function MotoAnswerCard({
       )}
 
       {answer.followUpQuestions.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {answer.followUpQuestions.map((q, i) => (
-            <button
-              key={i}
-              onClick={() => onFollowUpClick(q)}
-              className="rounded-full border border-accent/30 bg-accent/5 text-accent px-3 py-1.5 text-sm hover:bg-accent/10"
-            >
-              {q}
-            </button>
-          ))}
+        <div>
+          <p className="text-xs font-semibold text-muted mb-1.5">Useful follow-up</p>
+          <ul className="space-y-1">
+            {answer.followUpQuestions.map((q, i) => (
+              <li key={i} className="text-sm text-muted">
+                {q}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -130,6 +127,10 @@ function actionLabel(action: ActionTaken): string {
   if (action.type === "maintenance_event_created") {
     const label = action.serviceType ? SERVICE_TYPE_LABELS[action.serviceType] : "Maintenance";
     return action.odometerKm != null ? `${label} saved · ${formatKm(action.odometerKm)} km` : `${label} saved`;
+  }
+  if (action.type === "maintenance_event_corrected") {
+    const label = action.serviceType ? SERVICE_TYPE_LABELS[action.serviceType] : "Maintenance";
+    return action.odometerKm != null ? `${label} corrected · ${formatKm(action.odometerKm)} km` : `${label} corrected`;
   }
   if (action.type === "odometer_updated") {
     return `Odometer updated · ${formatKm(action.odometerKm ?? 0)} km`;
