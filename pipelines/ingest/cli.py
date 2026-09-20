@@ -41,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
         "--prune", action="store_true",
         help="Also delete documents whose source file no longer exists on disk (off by default)"
     )
+    moto_knowledge_parser.add_argument(
+        "--facts-only", action="store_true",
+        help="Re-extract and replace motorcycle_facts for already-ingested documents from current "
+             "on-disk content, ignoring the unchanged content-hash check — never touches chunks or "
+             "embeddings, no OpenAI call. Use after an extractor fix to backfill facts without re-embedding."
+    )
 
     args = parser.parse_args(argv)
 
@@ -85,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
 
         config = load_config()
         started = time.monotonic()
-        stats = ingest_motorcycle_knowledge(config, dry_run=args.dry_run, prune=args.prune)
+        stats = ingest_motorcycle_knowledge(config, dry_run=args.dry_run, prune=args.prune, facts_only=args.facts_only)
         elapsed = time.monotonic() - started
         print(f"Motorcycle knowledge ingestion completed in {elapsed:.1f}s")
         print(f"  documents discovered:  {stats.documents_discovered}")

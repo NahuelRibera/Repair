@@ -95,13 +95,21 @@ def category_for_section(section: str | None) -> str:
     return "other"
 
 
-def ingest_motorcycle_knowledge(config: Config, *, dry_run: bool = False, prune: bool = False) -> MotoIngestStats:
+def ingest_motorcycle_knowledge(
+        config: Config, *, dry_run: bool = False, prune: bool = False, facts_only: bool = False
+) -> MotoIngestStats:
+    """facts_only re-extracts and replaces motorcycle_facts for every
+    already-ingested document from its current on-disk content, ignoring
+    the content_hash unchanged-check and never touching chunks or
+    embeddings — the cheap path for backfilling facts onto documents
+    that were already embedded before an extractor fix, without an
+    OpenAI call or an app_config.openai_api_key requirement."""
     stats = MotoIngestStats()
     files = discover_markdown_files(config.motorcycle_knowledge_dir)
     stats.documents_discovered = len(files)
 
     client = None
-    if not dry_run:
+    if not dry_run and not facts_only:
         if not config.openai_api_key:
             raise RuntimeError("OPENAI_API_KEY is not set; pass dry_run=True to parse without embedding")
         client = OpenAI(api_key=config.openai_api_key)
@@ -111,11 +119,11 @@ def ingest_motorcycle_knowledge(config: Config, *, dry_run: bool = False, prune:
     with connect(config) as conn:
         for path in files:
             try:
-                _ingest_one_file(conn, config, client, path, stats, dry_run=dry_run)
+                _ingest_one_file(conn, config, client, path, stats, dry_run=dry_run, facts_only=facts_only)
             except KnowledgeFileError as e:
                 stats.documents_failed += 1
                 print(f"  SKIPPED {path}: {e}")
-        if prune and not dry_run:
+        if prune and not dry_run and not facts_only:
             stats.documents_pruned = _prune_removed(conn, on_disk_paths)
         conn.commit()
 
@@ -129,12 +137,26 @@ def _prune_removed(conn, on_disk_paths: set[str]) -> int:
         removed_ids = [doc_id for doc_id, rel_path in rows if rel_path not in on_disk_paths]
         for doc_id in removed_ids:
             cur.execute("DELETE FROM motorcycle_facts WHERE document_id = %s", (doc_id,))
+            # moto_retrieved_evidence.chunk_id has a plain FK (no cascade)
+            # to motorcycle_knowledge_chunks — the chunk delete below
+            # violates it unless these leaf evidence rows go first. Only
+            # the evidence rows pointing at THIS document's own chunks are
+            # touched; their parent moto_rag_runs rows, and every other
+            # table, are left alone.
+            cur.execute(
+                "DELETE FROM moto_retrieved_evidence WHERE chunk_id IN "
+                "(SELECT id FROM motorcycle_knowledge_chunks WHERE document_id = %s)",
+                (doc_id,),
+            )
             cur.execute("DELETE FROM motorcycle_knowledge_chunks WHERE document_id = %s", (doc_id,))
             cur.execute("DELETE FROM motorcycle_knowledge_documents WHERE id = %s", (doc_id,))
         return len(removed_ids)
 
 
-def _ingest_one_file(conn, config: Config, client: OpenAI | None, path: Path, stats: MotoIngestStats, *, dry_run: bool) -> None:
+def _ingest_one_file(
+        conn, config: Config, client: OpenAI | None, path: Path, stats: MotoIngestStats, *,
+        dry_run: bool, facts_only: bool = False
+) -> None:
     post = frontmatter.load(path)
     raw_text = path.read_text(encoding="utf-8")
     content_hash = sha256_text(raw_text)
@@ -167,6 +189,34 @@ def _ingest_one_file(conn, config: Config, client: OpenAI | None, path: Path, st
             (source_relative_path,),
         )
         existing = cur.fetchone()
+
+    if facts_only:
+        # Deliberately ignores the content_hash unchanged-check below —
+        # the whole point is to re-extract facts for a document whose
+        # content (and therefore chunks/embeddings) has NOT changed,
+        # only the extractor's own pattern coverage has. Never touches
+        # motorcycle_knowledge_chunks or calls the embeddings API.
+        if existing is None:
+            return  # nothing ingested yet for this path; a normal run handles that
+        document_id = existing[0]
+        facts = extract_facts(post.content)
+        if dry_run:
+            print(f"[dry-run][facts-only] {path.name}: would write {len(facts)} facts")
+            stats.documents_reingested += 1
+            return
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM motorcycle_facts WHERE document_id = %s", (document_id,))
+            for fact in facts:
+                cur.execute(
+                    """
+                    INSERT INTO motorcycle_facts (document_id, fact_type, value_numeric, value_text, unit, raw_source_text)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (document_id, fact.fact_type, fact.value_numeric, fact.value_text, fact.unit, fact.raw_source_text),
+                )
+        stats.documents_reingested += 1
+        stats.facts_written += len(facts)
+        return
 
     unchanged = (
         existing is not None
@@ -213,6 +263,17 @@ def _ingest_one_file(conn, config: Config, client: OpenAI | None, path: Path, st
             ),
         )
         document_id = cur.fetchone()[0]
+        # Same FK ordering as _prune_removed: a changed document's old
+        # chunks must have their (leaf) retrieved-evidence rows deleted
+        # first, or the chunk delete below violates
+        # moto_retrieved_evidence.chunk_id's FK. moto_rag_runs itself,
+        # chats, Garage vehicles, maintenance events, users and
+        # preferences are never touched here.
+        cur.execute(
+            "DELETE FROM moto_retrieved_evidence WHERE chunk_id IN "
+            "(SELECT id FROM motorcycle_knowledge_chunks WHERE document_id = %s)",
+            (document_id,),
+        )
         cur.execute("DELETE FROM motorcycle_knowledge_chunks WHERE document_id = %s", (document_id,))
         cur.execute("DELETE FROM motorcycle_facts WHERE document_id = %s", (document_id,))
 
@@ -251,17 +312,37 @@ def _get_or_create_manufacturer(conn, name: str) -> int:
 
 
 def _get_or_create_model(conn, manufacturer_id: int, name: str) -> int:
+    """Resolve model identity by its stable slug.
+
+    Accent/punctuation variants such as "Tenere 700" and "Ténéré 700"
+    deliberately resolve to the same model, while genuinely different
+    variants such as "Ténéré 700" and "Ténéré 700 World Raid" keep
+    different slugs and therefore different identities.
+    """
+    model_slug = slugify(name)
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id FROM motorcycle_models WHERE manufacturer_id = %s AND canonical_name = %s",
-            (manufacturer_id, name),
+            """
+            SELECT id
+            FROM motorcycle_models
+            WHERE manufacturer_id = %s AND slug = %s
+            ORDER BY id
+            LIMIT 1
+            """,
+            (manufacturer_id, model_slug),
         )
         row = cur.fetchone()
         if row:
             return row[0]
+
         cur.execute(
-            "INSERT INTO motorcycle_models (manufacturer_id, canonical_name, slug) VALUES (%s, %s, %s) RETURNING id",
-            (manufacturer_id, name, slugify(name)),
+            """
+            INSERT INTO motorcycle_models
+                (manufacturer_id, canonical_name, slug)
+            VALUES (%s, %s, %s)
+            RETURNING id
+            """,
+            (manufacturer_id, name, model_slug),
         )
         return cur.fetchone()[0]
 

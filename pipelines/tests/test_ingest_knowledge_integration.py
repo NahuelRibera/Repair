@@ -42,7 +42,7 @@ def isolated_schema_config_with_catalogue():
         with admin_conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA {schema_name}")
             cur.execute(f"SET search_path TO {schema_name}, public")
-            for migration_file in sorted(MIGRATIONS_DIR.glob("V*.sql")):
+            for migration_file in sorted(MIGRATIONS_DIR.glob("V*.sql"), key=lambda p: int(p.name.split("__", 1)[0][1:])):
                 if migration_file.name.startswith("V1__"):
                     continue
                 cur.execute(migration_file.read_text(encoding="utf-8"))

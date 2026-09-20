@@ -29,22 +29,29 @@ def _num(text: str) -> float:
 
 
 def _section(body: str, heading_pattern: str) -> str | None:
-    """Returns the text of one heading's own section (up to the next
-    heading of equal-or-higher level), or None if the heading isn't
-    present. heading_pattern matches the heading text, not the '#' marks.
+    """Returns the text of every heading matching heading_pattern (each
+    one's own section, up to its next heading of equal-or-higher level),
+    concatenated in document order, or None if the heading isn't present
+    anywhere. heading_pattern matches the heading text, not the '#' marks,
+    and may itself be an alternation (e.g. "(?:Brakes|Brake system)") to
+    cover a concept the corpus spells differently in different documents.
+
+    The expanded Yamaha KB repeats some heading text at more than one
+    level (e.g. a "### Engine oil" capacity blurb under "Quick
+    specifications" AND a separate "### Engine oil" interval note under
+    "Maintenance schedule") — concatenating every occurrence rather than
+    only the first means a pattern still finds its match wherever in the
+    document it actually lives. The original single-occurrence corpus is
+    unaffected: one match concatenated with itself is just itself.
     """
-    match = re.search(
-        rf"^(#{{1,4}})\s+{heading_pattern}\s*$",
-        body,
-        re.MULTILINE | re.IGNORECASE,
-    )
-    if not match:
-        return None
-    level = len(match.group(1))
-    start = match.end()
-    next_heading = re.search(rf"^#{{1,{level}}}\s+", body[start:], re.MULTILINE)
-    end = start + next_heading.start() if next_heading else len(body)
-    return body[start:end]
+    sections: list[str] = []
+    for match in re.finditer(rf"^(#{{1,4}})\s+{heading_pattern}\s*$", body, re.MULTILINE | re.IGNORECASE):
+        level = len(match.group(1))
+        start = match.end()
+        next_heading = re.search(rf"^#{{1,{level}}}\s+", body[start:], re.MULTILINE)
+        end = start + next_heading.start() if next_heading else len(body)
+        sections.append(body[start:end])
+    return "\n".join(sections) if sections else None
 
 
 # Canonical torque component names -> fact type, matched against the
@@ -97,13 +104,151 @@ def _extract_regex_fact(
             continue
         raw = m.group(0).strip()
         if as_text:
-            return Fact(fact_type, None, m.group(1).strip(), unit, raw)
+            value_text = m.group(1).strip()
+            # Expanded Yamaha Markdown may write plug maker/model as
+            # "NGK/LMAR8A-9."; normalize that separator to match the
+            # older corpus representation "NGK LMAR8A-9.".
+            if fact_type == "SPARK_PLUG_MODEL":
+                value_text = re.sub(r"^([^/\s]+)/(?=\S)", r"\1 ", value_text, count=1)
+            elif fact_type == "SPARK_PLUG_GAP_MM":
+                value_text = value_text.replace("–", "-").replace("—", "-")
+            return Fact(fact_type, None, value_text, unit, raw)
         return Fact(fact_type, _num(m.group(1)), None, unit, raw)
     return None
 
 
-def extract_facts(body: str) -> list[Fact]:
+
+_CANONICAL_MAINTENANCE_HEADING = r"Major recurring maintenance facts"
+
+
+def _canonical_bullet(section: str, label_pattern: str) -> tuple[str, str] | None:
+    """Return (value, raw_line) for one canonical maintenance-summary bullet.
+
+    The normalized corpus guarantees one ``### Major recurring maintenance facts``
+    section with stable labels.  Values remain source-specific, so this helper
+    reads only the exact labelled line and leaves all interpretation to the
+    fact-specific parsers below.
+    """
+    match = re.search(
+        rf"^\s*-\s*{label_pattern}\s*:\s*(?P<value>.+?)\s*$",
+        section,
+        re.MULTILINE | re.IGNORECASE,
+    )
+    if not match:
+        return None
+    value = match.group("value").strip()
+    raw = match.group(0).strip()
+    # The normalizer deliberately uses an explicit no-fixed-interval sentence
+    # when the source does not support a deterministic recurring fact.
+    if re.search(r"\bno\s+fixed\b", value, re.IGNORECASE):
+        return None
+    return value, raw
+
+
+def _months_from_explicit_interval(value: str) -> float | None:
+    """Parse an explicitly stated recurring year/month interval as months."""
+    m = re.search(r"(\d+)\s*years?\b", value, re.IGNORECASE)
+    if m:
+        return float(int(m.group(1)) * 12)
+    m = re.search(r"(\d+)\s*[- ]?\s*months?\b", value, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _extract_canonical_maintenance_facts(body: str) -> list[Fact]:
+    """Extract dashboard maintenance facts from the normalized summary block.
+
+    This is the primary source for recurring maintenance intervals.  Legacy
+    section-specific extractors remain as fallbacks for old/non-normalized
+    documents, but a fact found here wins during de-duplication.
+    """
+    section = _section(body, _CANONICAL_MAINTENANCE_HEADING)
+    if not section:
+        return []
+
     facts: list[Fact] = []
+
+    # Engine oil: never confuse the initial service point with the recurring
+    # interval.  Prefer the text after "then"; otherwise accept an explicit
+    # "every X km" recurring statement.
+    item = _canonical_bullet(section, r"Engine oil")
+    if item:
+        value, raw = item
+        parts = re.split(r"\bthen\b", value, maxsplit=1, flags=re.IGNORECASE)
+        recurring = parts[1] if len(parts) == 2 else value
+        # Without an explicit "then", prefer an "every X km" phrase.  Only
+        # fall back to a bare X km when the canonical value contains exactly
+        # one km figure, so an initial-service point can never become the
+        # repeating interval by accident.
+        km = re.search(r"(?:every|at each)\s*([\d,]+)\s*km\b", recurring, re.IGNORECASE)
+        if km is None and len(parts) == 2:
+            km = re.search(r"(?:at\s+)?([\d,]+)\s*km\b", recurring, re.IGNORECASE)
+        if km is None:
+            km_values = re.findall(r"([\d,]+)\s*km\b", recurring, re.IGNORECASE)
+            if len(km_values) == 1:
+                km = re.search(r"([\d,]+)\s*km\b", recurring, re.IGNORECASE)
+        if km:
+            facts.append(Fact("ENGINE_OIL_INTERVAL_KM", _num(km.group(1)), None, "km", raw))
+        months = _months_from_explicit_interval(recurring)
+        if months is not None:
+            facts.append(Fact("ENGINE_OIL_INTERVAL_MONTHS", months, None, "months", raw))
+
+    item = _canonical_bullet(section, r"Valve clearance")
+    if item:
+        value, raw = item
+        m = re.search(r"([\d,]+)\s*km\b", value, re.IGNORECASE)
+        if m:
+            facts.append(Fact("VALVE_CLEARANCE_INTERVAL_KM", _num(m.group(1)), None, "km", raw))
+
+    item = _canonical_bullet(section, r"Air[- ]filter replacement")
+    if item:
+        value, raw = item
+        m = re.search(r"([\d,]+)\s*km\b", value, re.IGNORECASE)
+        if m:
+            facts.append(Fact("AIR_FILTER_INTERVAL_KM", _num(m.group(1)), None, "km", raw))
+
+    item = _canonical_bullet(section, r"Brake fluid")
+    if item:
+        value, raw = item
+        months = _months_from_explicit_interval(value)
+        if months is not None:
+            facts.append(Fact("BRAKE_FLUID_INTERVAL_MONTHS", months, None, "months", raw))
+
+    item = _canonical_bullet(section, r"Coolant replacement")
+    if item:
+        value, raw = item
+        months = _months_from_explicit_interval(value)
+        if months is not None:
+            facts.append(Fact("COOLANT_CHANGE_INTERVAL_MONTHS", months, None, "months", raw))
+
+    item = _canonical_bullet(section, r"Drive[- ]chain cleaning/lubrication")
+    if item:
+        value, raw = item
+        m = re.search(r"([\d,]+)\s*km\b", value, re.IGNORECASE)
+        if m:
+            facts.append(Fact("CHAIN_LUBE_INTERVAL_KM", _num(m.group(1)), None, "km", raw))
+            facts.append(Fact("CHAIN_LUBE_INTERVAL", None, value, None, raw))
+
+    return facts
+
+
+def _dedupe_facts(facts: list[Fact]) -> list[Fact]:
+    """Keep the first fact of each type; canonical facts are added first."""
+    seen: set[str] = set()
+    result: list[Fact] = []
+    for fact in facts:
+        if fact.fact_type in seen:
+            continue
+        seen.add(fact.fact_type)
+        result.append(fact)
+    return result
+
+def extract_facts(body: str) -> list[Fact]:
+    # The normalized maintenance-summary block is authoritative for recurring
+    # dashboard intervals.  Legacy extractors below remain compatibility
+    # fallbacks for documents that predate normalization.
+    facts: list[Fact] = _extract_canonical_maintenance_facts(body)
     facts.extend(_extract_torque_table(body))
 
     # Each fact type may list more than one accepted phrasing: the corpus
@@ -114,38 +259,139 @@ def extract_facts(body: str) -> list[Fact]:
     # so adding one only ever increases coverage, never precision risk.
     extractors: list[tuple[str, tuple[str, ...], str, str | None, bool]] = [
         ("Engine oil", (r"Oil change only:\s*([\d.]+)\s*L",), "ENGINE_OIL_CAPACITY_L", "L", False),
-        ("Engine oil", (r"Oil and filter change:\s*([\d.]+)\s*L",), "ENGINE_OIL_CAPACITY_WITH_FILTER_L", "L", False),
-        ("Engine oil", (r"Then:\s*every\s*([\d,]+)\s*km",), "ENGINE_OIL_INTERVAL_KM", "km", False),
-        ("Engine oil", (r"Then:\s*every\s*[\d,]+\s*km\s*or\s*(\d+)\s*months?",), "ENGINE_OIL_INTERVAL_MONTHS", "months", False),
-        ("Spark plugs", (r"\*\*Type:\*\*\s*(.+)",), "SPARK_PLUG_MODEL", None, True),
-        ("Spark plugs", (r"\*\*Gap:\*\*\s*([\d.\-–]+\s*mm)",), "SPARK_PLUG_GAP_MM", "mm", True),
-        ("Valve clearance", (r"\*\*Interval:\*\*\s*every\s*([\d,]+)\s*km",), "VALVE_CLEARANCE_INTERVAL_KM", "km", False),
-        ("Cooling system", (r"Radiator and cooling circuit:\s*([\d.]+)\s*L",), "COOLANT_CAPACITY_L", "L", False),
-        ("Brakes", (r"\*\*Brake fluid:\*\*\s*(DOT\s*\d)",), "BRAKE_FLUID_TYPE", None, True),
+        (
+            "Engine oil",
+            (
+                r"Oil and filter(?: change)?:\s*([\d.]+)\s*L",
+                r"Engine-oil quantity with filter removed:\s*([\d.]+)\s*L",
+            ),
+            "ENGINE_OIL_CAPACITY_WITH_FILTER_L", "L", False,
+        ),
+        (
+            # The CP2-platform corpus (MT-07/MT-09/MT-09 SP/Ténéré 700) states
+            # the repeating oil interval only in the "Major recurring
+            # maintenance facts" summary bullet, not under "Engine oil"
+            # itself — e.g. "Engine oil: first service at 1,000 km / 1
+            # month, then at 6,000 km / 6-month increments...".
+            "(?:Engine oil|Major recurring maintenance facts)",
+            # "Then: every 6,000 km" (older corpus) vs. the expanded
+            # corpus's plain-prose "Continue at each 10,000 km schedule
+            # point." / "... every 10,000 km" — no bold label at all.
+            (
+                r"Then:\s*every\s*([\d,]+)\s*km", r"(?:every|at each)\s*([\d,]+)\s*km\s*schedule\s*point",
+                r"Engine oil:.*?then at\s*([\d,]+)\s*km",
+            ),
+            "ENGINE_OIL_INTERVAL_KM", "km", False,
+        ),
+        (
+            "(?:Engine oil|Major recurring maintenance facts)",
+            (
+                r"Then:\s*every\s*[\d,]+\s*km\s*or\s*(\d+)\s*months?",
+                r"Engine oil:.*?then at\s*[\d,]+\s*km\s*/\s*(\d+)-month",
+            ),
+            "ENGINE_OIL_INTERVAL_MONTHS", "months", False,
+        ),
+        (
+            "Spark plugs",
+            (r"\*\*Type:\*\*\s*(.+)", r"(?:Plug|Spark plug)\s+type:\s*(.+)"),
+            "SPARK_PLUG_MODEL", None, True,
+        ),
+        (
+            "Spark plugs",
+            (r"\*\*Gap:\*\*\s*([\d.\-–]+\s*mm)", r"-?\s*Gap:\s*([\d.\-–]+\s*mm)"),
+            "SPARK_PLUG_GAP_MM", "mm", True,
+        ),
+        (
+            "Valve clearance",
+            # "**Interval:** every 24,000 km" (older corpus) vs. the
+            # expanded corpus's "Check and adjust every 40,000 km." with
+            # no bold label, vs. the CP2-platform corpus's plain bullet
+            # "Interval: 42000 km" (no "every", no bold).
+            (
+                r"\*\*Interval:\*\*\s*every\s*([\d,]+)\s*km", r"[Cc]heck and adjust every\s*([\d,]+)\s*km",
+                r"Interval:\s*([\d,]+)\s*km",
+            ),
+            "VALVE_CLEARANCE_INTERVAL_KM", "km", False,
+        ),
+        (
+            "Cooling system",
+            (
+                r"Radiator and cooling circuit:\s*([\d.]+)\s*L",
+                r"Radiator/(?:cooling\s*)?circuit capacity:\s*([\d.]+)\s*L",
+            ),
+            "COOLANT_CAPACITY_L", "L", False,
+        ),
+        (
+            "Brakes",
+            (
+                r"\*\*Brake fluid:\*\*\s*(DOT\s*\d)",
+                r"-?\s*Brake fluid:\s*(DOT\s*\d)",
+            ),
+            "BRAKE_FLUID_TYPE", None, True,
+        ),
         (
             "Drive chain",
-            (r"distance A:\*\*\s*([\d.\-–]+\s*mm)", r"\*\*Specified slack\s*/?\s*measurement:\*\*\s*([\d.\-–]+\s*mm)"),
+            (
+                r"distance A:\*\*\s*([\d.\-–]+\s*mm)",
+                r"\*\*Specified slack\s*/?\s*measurement:\*\*\s*([\d.\-–]+\s*mm)",
+                r"Specified chain measurement/slack:\s*([\d.\-–]+\s*mm)",
+            ),
             "CHAIN_SLACK_MM", "mm", True,
         ),
         (
-            "Drive chain",
-            (r"\*\*Cleaning and lubrication:\*\*\s*(.+)", r"\*\*Cleaning and lubrication interval:\*\*\s*(.+)"),
+            "(?:Drive chain|Chain)",
+            (
+                r"\*\*Cleaning and lubrication:\*\*\s*(.+)", r"\*\*Cleaning and lubrication interval:\*\*\s*(.+)",
+                # Expanded corpus: plain prose, no bold label at all.
+                r"(Clean and lubricate every\s*[\d,]+\s*km\.?)",
+                # CP2-platform corpus: "Cleaning/lubrication interval:" (slash, no bold).
+                r"Cleaning/[Ll]ubrication interval:\s*(.+)",
+            ),
             "CHAIN_LUBE_INTERVAL", None, True,
         ),
-        ("Wheels, tires and brakes", (r"Front cold pressure:\s*([\d.]+)\s*kPa",), "FRONT_TIRE_PRESSURE_KPA", "kPa", False),
-        ("Wheels, tires and brakes", (r"Rear cold pressure:\s*([\d.]+)\s*kPa",), "REAR_TIRE_PRESSURE_KPA", "kPa", False),
-        ("Electrical system", (r"Battery:\s*(.+)",), "BATTERY_MODEL", None, True),
+        (
+            "(?:Wheels, tires and brakes|Tires, wheels and brakes)",
+            (r"Front cold pressure:\s*([\d.]+)\s*kPa",),
+            "FRONT_TIRE_PRESSURE_KPA", "kPa", False,
+        ),
+        (
+            "(?:Wheels, tires and brakes|Tires, wheels and brakes)",
+            (r"Rear cold pressure:\s*([\d.]+)\s*kPa",),
+            "REAR_TIRE_PRESSURE_KPA", "kPa", False,
+        ),
+        (
+            "(?:Electrical system|Electrical)",
+            (r"Battery:\s*(.+)",),
+            "BATTERY_MODEL", None, True,
+        ),
         # Numeric counterpart of CHAIN_LUBE_INTERVAL (above) for the
         # maintenance dashboard, which needs a plain number to compute a
         # remaining-distance figure — the text fact stays for chat prose.
         (
-            "Drive chain",
-            (r"\*\*Cleaning and lubrication:\*\*\s*every\s*([\d,]+)\s*km", r"\*\*Cleaning and lubrication interval:\*\*\s*[Ee]very\s*([\d,]+)\s*km"),
+            "(?:Drive chain|Chain)",
+            (
+                r"\*\*Cleaning and lubrication:\*\*\s*every\s*([\d,]+)\s*km",
+                r"\*\*Cleaning and lubrication interval:\*\*\s*[Ee]very\s*([\d,]+)\s*km",
+                r"[Cc]lean and lubricate every\s*([\d,]+)\s*km",
+                r"Cleaning/[Ll]ubrication interval:\s*every\s*([\d,]+)\s*km",
+            ),
             "CHAIN_LUBE_INTERVAL_KM", "km", False,
         ),
         # Wording varies between "every X km" and a bare "X km" (no "every") —
-        # accept both rather than silently missing half the corpus.
-        ("Air filter", (r"\*\*Replacement interval:\*\*\s*(?:every\s*)?([\d,]+)\s*km",), "AIR_FILTER_INTERVAL_KM", "km", False),
+        # accept both rather than silently missing half the corpus. The
+        # expanded corpus drops the "**Replacement interval:**" bold label
+        # entirely in favor of plain "Replace at X km ..." prose.
+        (
+            # The CP2-platform corpus titles this section "Air intake and
+            # filter" rather than "Air filter", and drops the bold label
+            # ("Replacement interval: 19000 km" with no "**").
+            "(?:Air filter|Air intake and filter)",
+            (
+                r"\*\*Replacement interval:\*\*\s*(?:every\s*)?([\d,]+)\s*km", r"[Rr]eplace at\s*([\d,]+)\s*km",
+                r"Replacement interval:\s*(?:every\s*)?([\d,]+)\s*km",
+            ),
+            "AIR_FILTER_INTERVAL_KM", "km", False,
+        ),
     ]
     for heading, patterns, fact_type, unit, as_text in extractors:
         fact = _extract_regex_fact(body, heading, patterns, fact_type, unit, as_text=as_text)
@@ -155,7 +401,7 @@ def extract_facts(body: str) -> list[Fact]:
     facts.extend(_extract_year_intervals_as_months(body))
     facts.extend(_extract_spark_plug_interval(body))
     facts.extend(_extract_oil_filter_interval(body))
-    return facts
+    return _dedupe_facts(facts)
 
 
 def _extract_spark_plug_interval(body: str) -> list[Fact]:
@@ -177,7 +423,12 @@ def _extract_spark_plug_interval(body: str) -> list[Fact]:
     if section is None:
         return []
 
-    simple = re.search(r"Replace every\s*([\d,]+)\s*km\s*or\s*(\d+)\s*months?", section, re.IGNORECASE)
+    simple = re.search(
+        r"(?:Replace every|Replacement interval:)\s*([\d,]+)\s*km"
+        r"(?:\s*\([^)]*\))?\s*or\s*(\d+)\s*months?",
+        section,
+        re.IGNORECASE,
+    )
     if simple:
         return [
             Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", _num(simple.group(1)), None, "km", simple.group(0).strip()),
@@ -227,25 +478,54 @@ def _extract_oil_filter_interval(body: str) -> list[Fact]:
     return facts
 
 
-# Time-based intervals expressed in the source as "every N years" — stored
-# in months (N * 12) so MaintenanceStatusService can compare every
-# time-based fact type on one common unit rather than special-casing years
-# vs. months per service type.
+# Time-based intervals — stored in months so MaintenanceStatusService can
+# compare every time-based fact type on one common unit. Most phrasings
+# state the interval in years (captured value * 12); the CP2-platform
+# corpus sometimes instead pairs a km figure with the real, already-monthly
+# figure ("...25,000 km / 24 months...") — each pattern below says which
+# unit its own capture group is in, so that value is never re-converted.
 _YEAR_INTERVAL_SOURCES = (
-    ("Cooling system", r"\*\*Coolant replacement:\*\*\s*every\s*(\d+)\s*years?", "COOLANT_CHANGE_INTERVAL_MONTHS"),
-    ("Brakes", r"Change brake fluid every\s*(\d+)\s*years?", "BRAKE_FLUID_INTERVAL_MONTHS"),
+    (
+        "Cooling system",
+        (
+            (r"\*\*Coolant replacement:\*\*\s*every\s*(\d+)\s*years?", "years"),
+            (r"[Rr]eplace coolant every\s*(\d+)\s*years?", "years"),
+            # CP2-platform corpus: "Coolant replacement interval: 3 years."
+            # / "Coolant replacement: 3 years." (no "every", no bold) — or,
+            # for some model-years, "...25,000 km / 24 months..." (a km
+            # figure paired with the real, stated months figure).
+            (r"Coolant replacement(?:\s*interval)?:\s*(\d+)\s*years?", "years"),
+            (r"Coolant replacement(?:\s*interval)?:\s*[\d,]+\s*km[^\n]*?(\d+)\s*months?", "months"),
+        ),
+        "COOLANT_CHANGE_INTERVAL_MONTHS",
+    ),
+    (
+        # Expanded corpus uses "### Brake system" for this note rather
+        # than "### Brakes", and says "Replace" rather than "Change".
+        "(?:Brakes|Brake system)",
+        (
+            (r"Change brake fluid every\s*(\d+)\s*years?", "years"),
+            (r"[Rr]eplace brake fluid every\s*(\d+)\s*years?", "years"),
+            # CP2-platform corpus: "Brake-fluid replacement interval: 2 years."
+            (r"Brake-fluid replacement(?:\s*interval)?:\s*(\d+)\s*years?", "years"),
+        ),
+        "BRAKE_FLUID_INTERVAL_MONTHS",
+    ),
 )
 
 
 def _extract_year_intervals_as_months(body: str) -> list[Fact]:
     facts: list[Fact] = []
-    for heading, pattern, fact_type in _YEAR_INTERVAL_SOURCES:
+    for heading, patterns, fact_type in _YEAR_INTERVAL_SOURCES:
         section = _section(body, heading)
         if section is None:
             continue
-        m = re.search(pattern, section, re.IGNORECASE)
-        if not m:
-            continue
-        years = int(m.group(1))
-        facts.append(Fact(fact_type, float(years * 12), None, "months", m.group(0).strip()))
+        for pattern, captured_unit in patterns:
+            m = re.search(pattern, section, re.IGNORECASE)
+            if not m:
+                continue
+            value = int(m.group(1))
+            months = value * 12 if captured_unit == "years" else value
+            facts.append(Fact(fact_type, float(months), None, "months", m.group(0).strip()))
+            break
     return facts

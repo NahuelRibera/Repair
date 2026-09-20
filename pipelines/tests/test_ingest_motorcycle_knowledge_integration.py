@@ -44,7 +44,7 @@ def isolated_schema_config(tmp_path):
         with admin_conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA {schema_name}")
             cur.execute(f"SET search_path TO {schema_name}, public")
-            for migration_file in sorted(MIGRATIONS_DIR.glob("V*.sql")):
+            for migration_file in sorted(MIGRATIONS_DIR.glob("V*.sql"), key=lambda p: int(p.name.split("__", 1)[0][1:])):
                 if migration_file.name.startswith("V1__"):
                     continue
                 cur.execute(migration_file.read_text(encoding="utf-8"))
@@ -173,6 +173,65 @@ def test_changed_content_replaces_chunks_without_duplicating(isolated_schema_con
         docs, chunks_after, _ = _counts(conn)
     assert docs == 1  # still one document row, not a duplicate
     assert chunks_after > chunks_before
+
+
+def test_reingesting_a_changed_document_survives_referenced_evidence(isolated_schema_config):
+    """A chunk that was actually retrieved and cited by a real chat turn
+    is referenced by moto_retrieved_evidence.chunk_id (plain FK, no
+    cascade). Re-ingesting that document after its content changes must
+    not raise a ForeignKeyViolation on the old chunk delete, must clean up
+    only the now-dangling evidence row for the superseded chunk, and must
+    never touch the parent moto_rag_runs row or any unrelated table."""
+    config = isolated_schema_config
+    path = _write(config.motorcycle_knowledge_dir, "yamaha/mt-07/2025.md", VALID_DOC)
+    ingest_mod.ingest_motorcycle_knowledge(config, dry_run=False)
+
+    with psycopg.connect(config.dsn, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM motorcycle_models WHERE canonical_name = 'MT-07'")
+            model_id = cur.fetchone()[0]
+            cur.execute("SELECT id FROM motorcycle_knowledge_chunks LIMIT 1")
+            old_chunk_id = cur.fetchone()[0]
+
+            visitor_id = str(uuid.uuid4())
+            cur.execute(
+                "INSERT INTO garage_vehicles (visitor_id, model_id, year) VALUES (%s, %s, 2025) RETURNING id",
+                (visitor_id, model_id),
+            )
+            garage_vehicle_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO moto_chat_sessions (visitor_id, garage_vehicle_id) VALUES (%s, %s) RETURNING id",
+                (visitor_id, garage_vehicle_id),
+            )
+            session_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO moto_rag_runs (request_id, session_id, garage_vehicle_id, provider_status) "
+                "VALUES (%s, %s, %s, 'ok') RETURNING id",
+                (str(uuid.uuid4()), session_id, garage_vehicle_id),
+            )
+            rag_run_id = cur.fetchone()[0]
+            cur.execute(
+                "INSERT INTO moto_retrieved_evidence (rag_run_id, chunk_id, rank) VALUES (%s, %s, 1)",
+                (rag_run_id, old_chunk_id),
+            )
+
+    changed = VALID_DOC + "\n### Extra section\n\nSome new content that adds one more chunk.\n"
+    path.write_text(changed, encoding="utf-8")
+
+    stats = ingest_mod.ingest_motorcycle_knowledge(config, dry_run=False)  # must not raise
+    assert stats.documents_reingested == 1
+    assert stats.documents_failed == 0
+
+    with psycopg.connect(config.dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM motorcycle_knowledge_documents")
+            assert cur.fetchone()[0] == 1
+            cur.execute("SELECT count(*) FROM moto_retrieved_evidence WHERE chunk_id = %s", (old_chunk_id,))
+            assert cur.fetchone()[0] == 0  # dangling evidence for the superseded chunk is gone
+            cur.execute("SELECT count(*) FROM moto_rag_runs WHERE id = %s", (rag_run_id,))
+            assert cur.fetchone()[0] == 1  # the rag run itself is untouched
+            cur.execute("SELECT count(*) FROM garage_vehicles WHERE id = %s", (garage_vehicle_id,))
+            assert cur.fetchone()[0] == 1  # Garage data is untouched
 
 
 def test_missing_required_frontmatter_field_is_skipped_not_partially_written(isolated_schema_config):
