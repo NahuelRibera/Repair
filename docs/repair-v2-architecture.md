@@ -246,10 +246,18 @@ one — the system prompt states this explicitly with both examples from
 the spec):
 
 ```
-proposedMaintenanceEvent?: { serviceType, odometerKm?, performedAt?, notes? }
+proposedMaintenanceEvents: [{ serviceType, odometerKm?, performedAt?, notes?, intent, isCorrection }]
 proposedOdometerUpdate?: { odometerKm }
 proposedPreference?: { preferenceType, context, data }
 ```
+
+(`proposedMaintenanceEvents` is a list, not a single optional object — a rider
+can confirm more than one distinct maintenance action in one message, e.g.
+"I changed the oil and oil filter at 24,000 km", and each gets its own
+entry. See `docs/maintenance-tracking.md` for the current, actively
+maintained description of this and the correction/relative-mileage
+semantics — this section predates those and is kept as historical
+architecture-decision context.)
 
 The backend never executes these directly. `MotoChatOrchestrationService`
 validates each proposal against real constraints before calling a
