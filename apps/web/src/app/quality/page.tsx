@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Logo } from "@/components/Logo";
+import { RepairLogo } from "@/components/RepairLogo";
 import { vehicleTitle } from "@/lib/types";
 import type { DataQualityIssue, DataQualitySummary, PageResult } from "@/lib/types";
 
@@ -31,7 +31,7 @@ export default function DataQualityPage() {
     <div className="flex-1 flex flex-col">
       <header className="border-b border-border bg-panel">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-4 flex items-center justify-between">
-          <Logo />
+          <RepairLogo />
           <Link href="/chat" className="text-sm font-medium text-accent hover:underline">
             ← Back to app
           </Link>

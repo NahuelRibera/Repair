@@ -6,6 +6,34 @@ are POSIX shell; on Windows use WSL2 or Git Bash.
 All commands below assume your shell's working directory is the repo root
 unless a `cd` is shown.
 
+## Repair V2 (motorcycle product) — quick start
+
+The steps below (1, 2, 5, 6) apply unchanged. Step 3 (car catalogue
+import) and the car-specific parts of step 4 are **not needed** for the
+motorcycle product — skip straight to motorcycle knowledge ingestion:
+
+```bash
+docker compose up -d db                         # 1. start Postgres
+cd apps/api && ./mvnw spring-boot:run            # 2. applies V1-V7 migrations, then Ctrl+C
+cd pipelines
+python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+python -m ingest.cli ingest-motorcycle-knowledge # 4. ingest knowledge/motorcycles/**/*.md (needs OPENAI_API_KEY)
+cd apps/api && ./mvnw spring-boot:run             # 5. API on :8082
+cd apps/web && npm install && npm run dev         # 6. web on :3000
+```
+
+Then open <http://localhost:3000> — "Choose your bike" walks through the
+dynamic manufacturer → model → year catalog built from whatever's been
+ingested (Yamaha MT-07/MT-09/MT-09 SP/Ténéré 700/Ténéré 700 World Raid
+out of the box). See `docs/knowledge-ingestion.md` for how to add a new
+manufacturer/model/year with zero code changes.
+
+The car prototype (catalogue import, car knowledge ingestion, `/quality`
+page) still works exactly as documented below — it's a preserved,
+independent code path, not needed for the motorcycle product.
+
+---
+
 ## 0. Prerequisites
 
 - Docker Desktop running
@@ -163,6 +191,37 @@ nohup npm run dev > ../../.logs/web.log 2>&1 &
 disown
 ```
 
+## Clearing demo/QA data (optional, manual only)
+
+`scripts/clear-demo-data.sh` clears Garage vehicles, maintenance events,
+preferences, and conversation history (both the authenticated motorcycle
+domain and the legacy anonymous car-prototype path) from your **local**
+database — never the motorcycle catalog or knowledge base. It is never run
+automatically by anything (no hook, no CI job, no application code path)
+and is deliberately hard to trigger by accident:
+
+```bash
+scripts/clear-demo-data.sh                                        # dry run: prints target + row counts, deletes nothing
+scripts/clear-demo-data.sh --yes                                   # still a dry run — --yes alone is not enough
+scripts/clear-demo-data.sh --yes --confirm CLEAR-REPAIR-DEMO-DATA   # actually deletes
+```
+
+Before doing anything destructive, it also refuses to run at all unless
+the target is unambiguously *this* project's local dev database — see
+`scripts/lib/db-safety-guard.sh`:
+
+- host must be `localhost` or `127.0.0.1` (never a remote or shared host);
+- the database name must be exactly `repair_v2`;
+- it hard-refuses the owner's separate car-prototype database
+  (`repair_db`) and any name that merely contains `prod`.
+
+`scripts/clear-demo-data.guard.test.sh` unit-tests that guard logic (pure
+bash, no database needed):
+
+```bash
+bash scripts/clear-demo-data.guard.test.sh
+```
+
 ## 7. Stopping everything
 
 If you started the API/web app in a terminal tab: `Ctrl+C` there.
@@ -224,14 +283,31 @@ cd apps/api && ./mvnw test
 cd apps/web && npx tsc --noEmit && npm run lint && npm run build
 
 # Web: end-to-end (requires the API + db running; starts its own Next.js
-# dev server automatically). No OPENAI_API_KEY needed — it exercises the
-# API's real "AI not configured" path, not a live model call.
+# dev server automatically). golden-path.spec.ts additionally requires
+# the API running with SPRING_PROFILES_ACTIVE=dev (see below and
+# docs/authentication.md) — every other spec file runs against the
+# API's normal profile. The chat-turn network call is always stubbed,
+# so no real OPENAI_API_KEY spend happens regardless of what's in .env.
+cd apps/api && SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run   # separate terminal
 cd apps/web && npx playwright test
 ```
 
 None of the automated tests call the real OpenAI API. The only thing that
 requires a real `OPENAI_API_KEY` is step 4 (embedding the knowledge corpus)
 and manually exercising a live chat conversation in the browser.
+
+`tests/e2e/golden-path.spec.ts` and the ownership-isolation test within it
+sign in via the real backend using `tests/e2e/dev-auth.ts` (the manual-QA-
+only `DevLoginController`), so they only run correctly against an API
+started with the `dev` profile as shown above — see docs/authentication.md
+"Testing without a Google account". Every other E2E spec mocks
+`/api/me` instead and runs against the API's normal profile.
+
+The motorcycle-specific test files (all offline, no API key needed):
+`pipelines/tests/test_motorcycle_facts.py`,
+`pipelines/tests/test_ingest_motorcycle_knowledge_integration.py`,
+`apps/api/src/test/java/dev/repair/api/motochat/*`,
+`apps/api/src/test/java/dev/repair/api/garage/*`.
 
 ## Ports reference
 

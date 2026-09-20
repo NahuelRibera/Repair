@@ -2,55 +2,56 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { api } from "@/lib/api";
-import type { SessionDetail } from "@/lib/types";
-import { useDemoVehicle } from "@/lib/useDemoVehicle";
-import { VehiclePicker } from "./VehiclePicker";
+import { api, ApiError } from "@/lib/api";
+import { useAuth, loginUrl } from "@/lib/AuthProvider";
+import { savePendingBikeSelection } from "@/lib/pendingBikeSelection";
+import type { GarageVehicle, MotoSessionDetail } from "@/lib/types";
+import { BikePicker } from "./BikePicker";
 
-export function LandingPicker({ examples }: { examples: string[] }) {
+export function LandingPicker() {
   const router = useRouter();
-  const demo = useDemoVehicle();
+  const { user, loading } = useAuth();
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  async function startWithVariant(variantId: number, prefill?: string) {
+  async function selectBike(modelId: number, year: number) {
     setStarting(true);
+    setError(null);
+
+    // Manufacturer/model/year selection itself is public (BikePicker's
+    // own catalog lookups need no auth), but creating a garage vehicle
+    // and opening a conversation does. A visitor who isn't signed in yet
+    // gets sent to sign in first, with the exact bike they picked
+    // preserved so it's used automatically once they land back — see
+    // docs/authentication.md "landing bike selector before login".
+    if (!loading && !user) {
+      savePendingBikeSelection({ modelId, year });
+      window.location.href = loginUrl("/chat");
+      return;
+    }
+
     try {
-      const detail = await api.post<SessionDetail>("/api/sessions", { variantId });
-      const query = prefill ? `?prefill=${encodeURIComponent(prefill)}` : "";
-      router.push(`/chat/${detail.session.id}${query}`);
-    } finally {
+      // Normal "choose your bike" flow — reuse an existing garage vehicle
+      // for this exact manufacturer/model/year if the rider already has
+      // one, rather than creating a duplicate physical motorcycle.
+      const vehicle = await api.post<GarageVehicle>("/api/garage/vehicles", { modelId, year, allowDuplicate: false });
+      const detail = await api.post<MotoSessionDetail>("/api/moto-sessions", { garageVehicleId: vehicle.id });
+      router.push(`/chat/${detail.session.id}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        savePendingBikeSelection({ modelId, year });
+        window.location.href = loginUrl("/chat");
+        return;
+      }
+      setError("That bike isn't in the knowledge base yet. Try a different year.");
       setStarting(false);
     }
   }
 
-  async function startWithExample(prefill: string) {
-    // The demo vehicle is resolved once on mount by useDemoVehicle (the
-    // shared source of truth — see lib/useDemoVehicle.ts) rather than
-    // re-fetched here, so every example button opens the same, correct
-    // variant the "Supported demo vehicle" panel describes.
-    if (demo.status !== "available") {
-      router.push("/chat");
-      return;
-    }
-    await startWithVariant(demo.vehicle.variant.id, prefill);
-  }
-
   return (
     <div className={starting ? "opacity-60 pointer-events-none" : ""}>
-      <VehiclePicker onVariantSelected={(id) => startWithVariant(id)} />
-      <p className="text-white/40 text-xs text-center my-4">or try an example question</p>
-      <div className="space-y-2">
-        {examples.map((example) => (
-          <button
-            key={example}
-            type="button"
-            onClick={() => startWithExample(example)}
-            className="w-full text-left rounded-lg border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-white/80 hover:bg-white/10 hover:text-white transition-colors"
-          >
-            {example}
-          </button>
-        ))}
-      </div>
+      <BikePicker onSelected={selectBike} submitLabel="Start with this bike →" />
+      {error && <p className="text-red-300 text-xs mt-3">{error}</p>}
     </div>
   );
 }

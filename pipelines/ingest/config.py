@@ -28,6 +28,7 @@ class Config:
     vehicles_dir: Path
     legacy_sql_path: Path
     knowledge_dir: Path
+    motorcycle_knowledge_dir: Path
 
     openai_api_key: str | None
     embedding_model: str
@@ -64,6 +65,9 @@ def load_config() -> Config:
         ),
         knowledge_dir=Path(
             os.environ.get("KNOWLEDGE_DIR", str(REPO_ROOT / "data/knowledge"))
+        ),
+        motorcycle_knowledge_dir=Path(
+            os.environ.get("MOTORCYCLE_KNOWLEDGE_DIR", str(REPO_ROOT / "knowledge/motorcycles"))
         ),
         openai_api_key=os.environ.get("OPENAI_API_KEY") or None,
         embedding_model=os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),

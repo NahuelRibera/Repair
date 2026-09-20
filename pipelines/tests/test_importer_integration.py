@@ -42,7 +42,7 @@ def isolated_schema_config():
         with admin_conn.cursor() as cur:
             cur.execute(f"CREATE SCHEMA {schema_name}")
             cur.execute(f"SET search_path TO {schema_name}, public")
-            for migration_file in sorted(MIGRATIONS_DIR.glob("V*.sql")):
+            for migration_file in sorted(MIGRATIONS_DIR.glob("V*.sql"), key=lambda p: int(p.name.split("__", 1)[0][1:])):
                 sql = migration_file.read_text(encoding="utf-8")
                 # V1 creates the pgvector extension, which is already
                 # present database-wide; skip it inside the test schema.

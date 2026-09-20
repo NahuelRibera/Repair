@@ -1,74 +1,111 @@
-import { execSync } from "node:child_process";
 import { expect, Page, test } from "@playwright/test";
 
 /**
- * Regression tests for three concrete bugs fixed in this pass:
- *  1. The whole page scrolled with the conversation, hiding the sidebar.
- *  2. Manufacturer/model dropdowns silently capped at a small page size,
- *     making most of the real catalogue unreachable by browsing.
- *  3. The "supported demo vehicle" panel and its example buttons resolved
- *     to the wrong variant (the first row of a query sorted by year
- *     ascending, not the curated BMW E90 320d).
+ * REWRITTEN/TRIMMED for the motorcycle product and its Google-auth
+ * productization pass (2026-09-15). Audited test by test against the
+ * current app (see docs/planning/status.md for the summary):
  *
- * No OpenAI calls are made anywhere in this file. Test 1 needs a long
- * conversation to actually exercise scrolling — seeded via direct SQL
- * against the local dev database (bypassing the chat API entirely, so it
- * costs nothing), the same way this was verified manually during
- * development. Requires the local `repair-v2-db` container to be running.
+ * - "chat layout: independent scrolling" (kept, rewritten): the layout
+ *   bug this guarded against (whole page scrolling, hiding the sidebar)
+ *   is about ChatShell's CSS architecture, not car-vs-moto content, and
+ *   that architecture is unchanged and still worth protecting. Rewritten
+ *   to use a mocked signed-in session and a mocked long conversation
+ *   (see mockSignedInWithConversation below) instead of seeding
+ *   `diagnostic_messages` (a car-prototype table) via `docker exec psql`
+ *   — mocking the moto-sessions detail response directly is simpler,
+ *   faster, has no database dependency, and exercises the exact same
+ *   frontend rendering path.
+ *
+ * - "catalogue selectors: browsing beyond the first page" — the
+ *   *keyboard navigation* test is kept, rewritten to use the real
+ *   motorcycle catalogue (public, no auth needed). The other two tests
+ *   in this group ("a manufacturer/model reachable without typing, past
+ *   position ~20/~30") are DELETED: they guarded against a car-catalogue
+ *   backend endpoint silently paginating/capping its results — the
+ *   motorcycle catalogue endpoints
+ *   (MotorcycleCatalogController/BikePicker.fetchManufacturers/fetchModels)
+ *   have no pagination at all, so that bug class cannot recur here, and
+ *   the real seeded catalogue (one manufacturer, five models) is too
+ *   small to construct an equivalent "past a small page size" scenario
+ *   without fabricating fake catalogue data — which would just be
+ *   re-testing that Combobox renders whatever list it's given, already
+ *   covered by the keyboard-navigation test below.
+ *
+ * - "demo vehicle identification" (both tests) — DELETED. This tested a
+ *   car-prototype-only UI concept (a single spotlighted "supported demo
+ *   vehicle" panel + an example-question prefill button, backed by
+ *   `repair.demo.*` properties) that was not carried over to the
+ *   motorcycle product by design: the moto catalogue is fully dynamic,
+ *   every ingested bike is equally "supported," and there is no
+ *   single-vehicle showcase panel anywhere in the current landing page
+ *   or chat picker. There is no motorcycle equivalent to rewrite this
+ *   into.
  */
 
-function seedLongConversation(sessionId: number, messageCount: number) {
-  const values: string[] = [];
-  for (let i = 1; i <= messageCount; i++) {
-    values.push(
-      `(${sessionId}, 'user', 'Seeded test message ${i}', now() + interval '${i} seconds')`
-    );
-    values.push(
-      `(${sessionId}, 'assistant', 'Seeded test reply ${i}', now() + interval '${i} seconds' + interval '1 second')`
-    );
+const MOCK_USER = {
+  id: 1,
+  googleSub: "google-fake-sub",
+  email: "rider@example.test",
+  displayName: "Test Rider",
+  googlePictureUrl: null,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
+
+const SESSION_ID = 4242;
+
+function seededMessages(pairCount: number) {
+  const createdAt = new Date().toISOString();
+  const messages = [];
+  for (let i = 1; i <= pairCount; i++) {
+    messages.push({ id: i * 2, role: "user", content: `Seeded test message ${i}`, structuredResponseJson: null, createdAt });
+    messages.push({ id: i * 2 + 1, role: "assistant", content: `Seeded test reply ${i}`, structuredResponseJson: null, createdAt });
   }
-  const sql = `INSERT INTO diagnostic_messages (session_id, role, content, created_at) VALUES ${values.join(",")};`;
-  // No "-i": the SQL is passed as a -c argument, not piped over stdin, and
-  // an interactive docker exec here has occasionally raced the subsequent
-  // page navigation in this suite.
-  execSync(`docker exec repair-v2-db psql -U repair_v2 -d repair_v2 -v ON_ERROR_STOP=1 -c "${sql.replace(/"/g, '\\"')}"`, {
-    stdio: "pipe",
-  });
+  return messages;
 }
 
-/**
- * Creates a session via a direct fetch (cheaper than driving the full
- * VehiclePicker UI for tests that don't care about that flow). Must wait
- * for the sidebar's own initial `/api/sessions` fetch to settle first: on
- * a brand-new browser context neither request yet carries the anonymous
- * `repair_visitor` cookie, so firing both at once is a real race — the
- * backend mints a different visitor id for each, and whichever response
- * lands last silently overwrites the other's cookie, orphaning the
- * session this helper just created under the visitor id that lost.
- */
-async function createSession(page: Page, variantId = 23079): Promise<number> {
-  // Each Playwright test gets a fresh browser context, so the sidebar's
-  // own first fetch always resolves to an empty list before anything else
-  // has had a chance to create a session.
-  await expect(page.getByText("No conversations yet.")).toBeVisible();
-  return page.evaluate(async (id) => {
-    const res = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ variantId: id }),
+async function mockSignedInWithConversation(page: Page, pairCount: number, sidebarSessionCount: number) {
+  await page.route("**/api/me", (route) => route.fulfill({ json: MOCK_USER }));
+
+  const sidebarEntries = Array.from({ length: sidebarSessionCount }, (_, i) => ({
+    id: 1000 + i,
+    title: null,
+    garageVehicleId: 1,
+    manufacturerName: "Yamaha",
+    modelName: "MT-07",
+    year: 2023,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }));
+  await page.route("**/api/moto-sessions", (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    route.fulfill({ json: sidebarEntries });
+  });
+
+  await page.route(`**/api/moto-sessions/${SESSION_ID}`, (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    route.fulfill({
+      json: {
+        session: {
+          id: SESSION_ID,
+          title: null,
+          garageVehicleId: 1,
+          manufacturerName: "Yamaha",
+          modelName: "MT-07",
+          year: 2023,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        messages: seededMessages(pairCount),
+      },
     });
-    const data = await res.json();
-    return data.session.id;
-  }, variantId);
+  });
 }
 
 test.describe("chat layout: independent scrolling", () => {
   test("scrolling a long conversation keeps the sidebar, header, and composer in place", async ({ page }) => {
-    await page.goto("/chat");
-    const sessionId = await createSession(page);
-    seedLongConversation(sessionId, 25);
-    await page.goto(`/chat/${sessionId}`);
+    await mockSignedInWithConversation(page, 25, 1);
+    await page.goto(`/chat/${SESSION_ID}`);
 
     // No outer page scrollbar: the document itself must not be taller
     // than the viewport for this route (only the message list and the
@@ -92,33 +129,12 @@ test.describe("chat layout: independent scrolling", () => {
     await expect(page.getByText("Seeded test message 1", { exact: true })).toBeVisible();
     await expect(newChatButton).toBeInViewport();
     await expect(header).toBeInViewport();
-    await expect(page.getByPlaceholder("Describe the symptom in detail…")).toBeInViewport();
+    await expect(page.getByPlaceholder("Ask about maintenance, or describe what's happening…")).toBeInViewport();
   });
 
   test("scrolling the sidebar conversation list does not move the open conversation", async ({ page }) => {
-    await page.goto("/chat");
-    const sessionId = await createSession(page);
-    seedLongConversation(sessionId, 5);
-
-    // Enough sibling sessions to make the sidebar list itself scrollable.
-    // The cookie race that createSession() guards against is now moot —
-    // the visitor id is already established by the first createSession()
-    // call above — so these can fire straight from page.evaluate.
-    for (let i = 0; i < 20; i++) {
-      await page.evaluate(
-        async (variantId) => {
-          await fetch("/api/sessions", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ variantId }),
-          });
-        },
-        23079
-      );
-    }
-
-    await page.goto(`/chat/${sessionId}`);
+    await mockSignedInWithConversation(page, 5, 20);
+    await page.goto(`/chat/${SESSION_ID}`);
     await expect(page.getByText("Seeded test reply 5")).toBeVisible();
 
     const sidebarList = page.locator("aside ul, aside div.overflow-y-auto").first();
@@ -131,101 +147,19 @@ test.describe("chat layout: independent scrolling", () => {
   });
 });
 
-test.describe("catalogue selectors: browsing beyond the first page", () => {
-  test("a manufacturer sorted well past a small page size is reachable without typing", async ({ page }) => {
-    await page.goto("/chat");
-    await page.getByRole("button", { name: "Select manufacturer" }).click();
-    // No search text typed — this is browsing, not searching. "Toyota"
-    // sorts well past position 20 alphabetically among 112 manufacturers.
-    const listbox = page.getByRole("listbox");
-    await expect(listbox).toBeVisible();
-    await listbox.locator('[role="option"]', { hasText: "Toyota" }).scrollIntoViewIfNeeded();
-    await expect(listbox.getByRole("option", { name: "Toyota", exact: true })).toBeVisible();
-  });
-
-  test("BMW 3 Series Sedan is reachable in the model dropdown without a search query", async ({ page }) => {
-    await page.goto("/chat");
-    await page.getByRole("button", { name: "Select manufacturer" }).click();
-    await page.getByPlaceholder("Type to search, or browse below…").fill("BMW");
-    await page.getByRole("option", { name: "BMW", exact: true }).click();
-
-    await page.getByRole("button", { name: "Select model" }).click();
-    // Deliberately clear/skip the search box — "BMW 3 Series Sedan" sits
-    // around position 30 of ~100 BMW models sorted alphabetically.
-    const listbox = page.getByRole("listbox");
-    await expect(listbox).toBeVisible();
-    await listbox.getByRole("option", { name: "BMW 3 Series Sedan", exact: true }).scrollIntoViewIfNeeded();
-    await expect(listbox.getByRole("option", { name: "BMW 3 Series Sedan", exact: true })).toBeVisible();
-  });
-
+test.describe("catalogue selectors", () => {
   test("keyboard navigation selects an option without a mouse", async ({ page }) => {
-    await page.goto("/chat");
+    // Real motorcycle catalogue, no mocking needed — these endpoints are
+    // public (see SecurityConfig).
+    await page.route("**/api/me", (route) => route.fulfill({ status: 401, json: { error: "unauthenticated" } }));
+    await page.goto("/");
+
     await page.getByRole("button", { name: "Select manufacturer" }).click();
     const input = page.getByPlaceholder("Type to search, or browse below…");
-    await input.fill("BMW");
-    await expect(page.getByRole("option", { name: "BMW", exact: true })).toBeVisible();
+    await input.fill("Yamaha");
+    await expect(page.getByRole("option", { name: "Yamaha", exact: true })).toBeVisible();
     await input.press("ArrowDown");
     await input.press("Enter");
-    await expect(page.getByRole("button", { name: "BMW", exact: true })).toBeVisible();
-  });
-});
-
-test.describe("demo vehicle identification", () => {
-  test("the supported demo panel names the verified E90 320d, and its example button opens that exact variant", async ({ page }) => {
-    await page.goto("/chat");
-    const panel = page.getByText("Supported demo vehicle").locator("..");
-    await expect(panel.getByText(/\(E90\) 320d 6MT RWD \(177 HP\)/)).toBeVisible();
-
-    // The example button carries a "prefill" that auto-sends on landing in
-    // the new session — stub that one call so this test (which only cares
-    // about which variant it lands on, not the reply) never reaches the
-    // real chat pipeline. Without this, whether the app happens to have a
-    // live OPENAI_API_KEY configured locally would silently decide whether
-    // this test makes a real, billed OpenAI call.
-    await page.route("**/api/sessions/*/messages", (route) =>
-      route.fulfill({
-        json: {
-          messageId: 999001,
-          answer: {
-            answerType: "insufficient_evidence",
-            summary: "stubbed for test",
-            confirmedSymptoms: [],
-            followUpQuestions: [],
-            hypotheses: [],
-            safeChecks: [],
-            cautions: [],
-            missingInformation: [],
-            sourceChunkIds: [],
-          },
-          evidence: [],
-          debug: {
-            requestId: "00000000-0000-0000-0000-000000000000",
-            variantId: 23079,
-            embeddingModel: null,
-            generationModel: null,
-            promptTokens: null,
-            completionTokens: null,
-            retrievalMillis: null,
-            generationMillis: null,
-            providerStatus: "missing_key",
-            errorDetail: null,
-          },
-        },
-      })
-    );
-
-    await page.getByRole("button", { name: /The driver's window won't go up/ }).click();
-    await expect(page).toHaveURL(/\/chat\/\d+/);
-    const header = page.getByRole("banner");
-    await expect(header.getByText("BMW 3 Series (E90) 320d 6MT RWD (177 HP)")).toBeVisible();
-  });
-
-  test("the landing page and in-app panel describe the same demo vehicle", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByText(/BMW 3 Series \(E90\) 320d has full scenario coverage/)).toBeVisible();
-
-    await page.goto("/chat");
-    const panel = page.getByText("Supported demo vehicle").locator("..");
-    await expect(panel.getByText(/\(E90\) 320d 6MT RWD \(177 HP\)/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Yamaha", exact: true })).toBeVisible();
   });
 });

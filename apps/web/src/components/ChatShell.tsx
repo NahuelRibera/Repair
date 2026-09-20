@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Sidebar } from "./Sidebar";
+import { UserMenu } from "./UserMenu";
 
 export function ChatShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -18,18 +19,20 @@ export function ChatShell({ children }: { children: React.ReactNode }) {
     <div className="h-dvh flex overflow-hidden">
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="lg:hidden flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
+        <div className="flex items-center gap-3 border-b border-border px-4 py-3 shrink-0">
           <button
             type="button"
             aria-label="Open menu"
             onClick={() => setMobileOpen(true)}
-            className="p-1.5 -ml-1.5"
+            className="p-1.5 -ml-1.5 lg:hidden"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
-          <span className="font-semibold text-sm">Repair</span>
+          <span className="font-semibold text-sm lg:hidden">Repair</span>
+          <div className="flex-1" />
+          <UserMenu />
         </div>
         <div className="flex-1 min-h-0 flex flex-col">{children}</div>
       </div>

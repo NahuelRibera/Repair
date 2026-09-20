@@ -31,6 +31,23 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="Parse and chunk without calling OpenAI or writing embeddings"
     )
 
+    moto_knowledge_parser = sub.add_parser(
+        "ingest-motorcycle-knowledge", help="Embed and store the knowledge/motorcycles Markdown corpus"
+    )
+    moto_knowledge_parser.add_argument(
+        "--dry-run", action="store_true", help="Parse and chunk without calling OpenAI or writing embeddings"
+    )
+    moto_knowledge_parser.add_argument(
+        "--prune", action="store_true",
+        help="Also delete documents whose source file no longer exists on disk (off by default)"
+    )
+    moto_knowledge_parser.add_argument(
+        "--facts-only", action="store_true",
+        help="Re-extract and replace motorcycle_facts for already-ingested documents from current "
+             "on-disk content, ignoring the unchanged content-hash check — never touches chunks or "
+             "embeddings, no OpenAI call. Use after an extractor fix to backfill facts without re-embedding."
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "import":
@@ -60,6 +77,30 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  documents unchanged:   {stats.documents_unchanged}")
         print(f"  documents (re)ingested:{stats.documents_reingested}")
         print(f"  chunks written:        {stats.chunks_written}")
+        print(f"  embedding errors:      {stats.embedding_errors}")
+        if stats.embedding_tokens_used > 0:
+            cost = stats.embedding_tokens_used / 1_000_000 * TEXT_EMBEDDING_3_SMALL_PRICE_PER_1M_TOKENS
+            print(f"  embedding tokens used: {stats.embedding_tokens_used} (measured, reported by the API)")
+            print(f"  estimated cost:        ${cost:.6f} (at text-embedding-3-small's $0.02/1M rate)")
+        else:
+            print("  embedding tokens used: 0 (no new embedding calls were made this run)")
+        return 0
+
+    if args.command == "ingest-motorcycle-knowledge":
+        from embeddings.ingest_motorcycle_knowledge import ingest_motorcycle_knowledge
+
+        config = load_config()
+        started = time.monotonic()
+        stats = ingest_motorcycle_knowledge(config, dry_run=args.dry_run, prune=args.prune, facts_only=args.facts_only)
+        elapsed = time.monotonic() - started
+        print(f"Motorcycle knowledge ingestion completed in {elapsed:.1f}s")
+        print(f"  documents discovered:  {stats.documents_discovered}")
+        print(f"  documents unchanged:   {stats.documents_unchanged}")
+        print(f"  documents (re)ingested:{stats.documents_reingested}")
+        print(f"  documents failed:      {stats.documents_failed}")
+        print(f"  documents pruned:      {stats.documents_pruned}")
+        print(f"  chunks written:        {stats.chunks_written}")
+        print(f"  facts written:         {stats.facts_written}")
         print(f"  embedding errors:      {stats.embedding_errors}")
         if stats.embedding_tokens_used > 0:
             cost = stats.embedding_tokens_used / 1_000_000 * TEXT_EMBEDDING_3_SMALL_PRICE_PER_1M_TOKENS

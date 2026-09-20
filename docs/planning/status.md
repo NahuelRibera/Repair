@@ -1,8 +1,214 @@
 # Implementation status
 
-Last updated: 2026-09-13 (bug-fix session: chat scroll layout, catalogue
-pagination, demo-vehicle identification). Working log, not a changelog —
-describes what is actually verified right now.
+Last updated: 2026-09-15 (productization pass — Google auth, ownership
+migration, landing redesign; see below). Working log, not a changelog —
+describes what is actually verified right now. Everything below the
+"Repair V2 motorcycle pivot" section is the car prototype's own history,
+preserved as-is (that prototype is a preserved historical checkpoint, not
+deleted — see CLAUDE.md and `docs/repair-v2-current-state.md`).
+
+## Productization pass — Google auth, ownership migration, landing (2026-09-15)
+
+Full write-up: `docs/authentication.md`. Summary:
+
+- **Google-only OAuth2/OIDC login**, backend-owned (Spring Security,
+  endpoints kept under `/api/**` so the existing Next.js rewrite proxy
+  covers the whole login dance). Identity key is the OIDC `sub`
+  (`app_users.google_sub`), never email. New Flyway `V8` migration adds
+  `app_users` and nullable `user_id` ownership columns to
+  `garage_vehicles`/`moto_chat_sessions`, alongside (not replacing) the
+  preserved anonymous `visitor_id` used by the car prototype.
+- **Ownership migrated** from anonymous `visitor_id` (UUID) to real
+  `user_id` (long) across the `garage` and `motochat` packages —
+  repositories bake `user_id` into every query's `WHERE` clause; no
+  method reads/writes by id alone. Cross-user isolation covered by
+  `GarageVehicleRepositoryIT`.
+- **Auth-gated**: `/api/garage/**`, `/api/moto-sessions/**`,
+  `/api/moto-rag-runs/**`, `/api/me*`. The landing page and its dynamic
+  bike picker stay public; picking a bike while signed out preserves the
+  selection (`localStorage`) across the login round trip and auto-creates
+  the garage vehicle + conversation once signed in.
+- **CSRF**: cookie-to-header (`XSRF-TOKEN` → `X-XSRF-TOKEN`), fixed to use
+  the plain `CsrfTokenRequestAttributeHandler` (Spring Security 6's
+  default `XorCsrfTokenRequestAttributeHandler` rejects a raw cookie value
+  echoed back verbatim by a JS SPA — found via live browser testing, not
+  by the test suite, which only asserted the cookie's presence and that a
+  *missing* header was rejected — `SecurityConfigIT` should eventually
+  gain a positive "valid header succeeds" case).
+- **Helmet avatars**: 10-key backend allow-list
+  (`HelmetAvatarCatalog`), never a stored path/URL; frontend falls back to
+  an initial-in-a-circle until real images are dropped into
+  `apps/web/public/avatars/helmets/` (see its `ASSETS.md`).
+- **Landing page redesigned** (hero, features, how-it-works, three
+  editorial "story" sections, a non-functional "From the garage" card
+  grid) — copy is original, written for this pass; no verbatim spec text
+  was available to reuse. Logo was **not** redesigned from scratch — the
+  existing abstract mark was kept and just consolidated across nav/
+  footer/favicon/avatar-fallback use, a deliberate scope trade-off (see
+  final report in the session transcript for the reasoning).
+- **Dev-only test auth**: `DevLoginController`, gated by
+  `@Profile("dev")` (not a property — the bean doesn't exist unless
+  `SPRING_PROFILES_ACTIVE=dev`), lets the authenticated flow be manually
+  QA'd and reproduced in Playwright without a real Google account.
+- **New dev-only cleanup script** (`scripts/clear-demo-data.sh`) clears
+  demo Garage/conversation data — dry-run by default, requires both
+  `--yes` and an exact `--confirm CLEAR-REPAIR-DEMO-DATA` phrase, and a
+  safety guard (`scripts/lib/db-safety-guard.sh`, unit-tested in
+  `clear-demo-data.guard.test.sh`) refuses to run against anything but
+  `repair_v2` on `localhost`/`127.0.0.1`, hard-blocking `repair_db` and
+  anything "prod"-looking. (This exists *because* an earlier draft of the
+  script was run against the real local dev DB during this same pass and
+  wiped its accumulated demo data — a mistake, disclosed to and accepted
+  by the project owner, who asked for exactly these guards afterward.)
+- **Regression**: 115/115 Java tests, 50/50 Python tests, clean `tsc`,
+  clean `next build`, new `auth-gating.spec.ts` Playwright suite 6/6.
+  10 pre-existing Playwright failures in `golden-path.spec.ts` /
+  `layout-and-catalogue.spec.ts` are unrelated — those files test the
+  pre-motorcycle-pivot car-only landing page and were last touched before
+  the pivot itself; not modified or caused by this pass.
+- Left uncommitted for manual review, per instruction.
+
+## QA / correctness pass on the motorcycle vertical slice (2026-09-14)
+
+Manual QA on the checkpoint tagged `motorcycle-v2-functional-checkpoint`
+found several real bugs; this pass fixed them, added regression coverage,
+and live-verified every fix against the real Yamaha corpus with a real
+model. See `docs/maintenance-tracking.md` for the design detail. Summary:
+
+- **Critical fix — false-positive maintenance writes.** A hypothetical
+  question ("If I were at 25,000 km, what maintenance would be due?")
+  could produce a saved maintenance event / odometer update. Root cause:
+  the only guard was a system-prompt instruction with no backend
+  enforcement. Fixed with a two-layer gate — every proposal now carries a
+  model-reported `intent` (CONFIRMED_COMPLETED/UNCERTAIN_PAST/
+  PLANNED_FUTURE/HYPOTHETICAL/QUESTION/RECOMMENDATION/UNKNOWN), and a new
+  deterministic `ActionIntentGuard` independently vetoes any proposal —
+  regardless of the model's own claimed intent — when the rider's raw
+  message contains hypothetical/uncertain/planned-future language. Live
+  re-tested with the exact reported message: zero DB writes, odometer
+  unchanged. See `ActionIntentGuardTest`,
+  `MotoChatOrchestrationServiceTest` scenarios A–I.
+- **Garage duplication fixed.** Selecting the same bike repeatedly
+  through the normal flow now reuses the existing garage vehicle
+  (`GarageVehicleRepository.findExisting`); the Garage page's explicit
+  "+ Add another bike" still creates a genuinely new one. Live-verified:
+  three repeated selections all returned the same vehicle id; the
+  garage's own list never grew.
+- **Maintenance dashboard fact mapping expanded.** Added deterministic
+  extraction (Python) for oil-filter, air-filter, chain-lube, and
+  spark-plug intervals (derived from real consecutive numbers already in
+  the source Markdown, never fabricated), and wired them into
+  `MaintenanceStatusService`'s service-type mapping. A new
+  `INTERVAL_KNOWN_NO_HISTORY` status is now distinct from `UNKNOWN` — "we
+  know the interval, we just don't have your history" vs. "we have no
+  verified interval at all." Live-verified: the dashboard for a fresh
+  bike now shows real intervals ("Interval known" badge, e.g. "every
+  12,000 km") for 7 of 10 service types instead of blanket "Unknown".
+- **Provenance separation.** The structured answer now has a separate
+  `contextUsed` field (the rider's own odometer/history/preferences) next
+  to `confirmedFacts` (verified manufacturer facts only), rendered as two
+  visually distinct sections in the UI. Fixed the actual root cause of
+  raw-enum leakage into chat text: the facts block sent to the model used
+  to say "prefer these verbatim" over a line literally labeled with the
+  raw fact_type key (e.g. "ENGINE_OIL_INTERVAL_KM: 6000 km") — now uses
+  `MotorcycleFactLabels` for human phrasing, plus a frontend regex
+  safety net.
+- **Context relevance.** Maintenance history is now filtered by
+  query-keyword relevance before being sent to the model
+  (`MaintenanceContextRelevance`) — an overheating question no longer
+  drags in unrelated chain-lubrication history. Live-verified.
+- **Follow-up question cap.** Schema-level `maxItems: 2` on
+  `followUpQuestions` plus a server-side clamp as a second guarantee.
+- **Chat titles.** Sidebar conversations about the same bike no longer
+  all show the identical bike name — a deterministic (no extra AI call)
+  keyword-based `ChatTitleGenerator` assigns a topic title from the first
+  message ("Oil change", "Cooling issue", etc.), falling back to a
+  trimmed excerpt.
+- **Prompt rewrite** covering: general-guidance vs. verified-fact
+  labeling (never "official data"), personalized-advice vs. verified
+  baseline separation, deterministic unit conversion (no unnecessary
+  clarification), appropriately uncertain troubleshooting language, and
+  honesty about partial procedures. These are model-behavior fixes,
+  spot-verified live (see `docs/retrieval-evaluation.md`) rather than
+  unit-testable, since they depend on live model phrasing.
+
+**Tests**: Java 87/87 (was ~70 before this pass; new:
+`ActionIntentGuardTest`, `ChatTitleGeneratorTest`,
+`MaintenanceContextRelevanceTest`, `GarageVehicleControllerTest`, plus
+expanded `MotoChatOrchestrationServiceTest` and
+`MaintenanceStatusServiceTest`), Python 50/50 (was 48; new fact-extractor
+tests), `tsc --noEmit` and `next build` clean.
+
+**Known limitations after this pass**: no automated Playwright coverage
+was added for the motorcycle flow (still manual + live verification, as
+in the prior pass); model-behavior prompt fixes (context relevance
+nuance, procedural honesty, troubleshooting tone) are verified by spot
+example, not exhaustively, since they depend on live LLM output rather
+than deterministic code; the "next scheduled" dashboard figure for
+`INTERVAL_KNOWN_NO_HISTORY` assumes zero prior service, which is a
+labeled best-effort convention, not a verified fact.
+
+## Repair V2 motorcycle pivot (2026-09-14)
+
+Full car → motorcycle pivot on branch `repair-v2-motorcycles`. See
+`docs/repair-v2-current-state.md` (audit), `docs/repair-v2-architecture.md`
+(design), `docs/knowledge-ingestion.md`, `docs/maintenance-tracking.md`,
+and `docs/retrieval-evaluation.md` for full detail; this is the summary.
+
+**Built and verified, live, this session:**
+
+- Flyway `V6`/`V7`: motorcycle catalog (manufacturers/models/aliases/
+  knowledge documents/chunks/facts) and garage/maintenance (garage
+  vehicles/maintenance events/preferences/moto chat sessions+RAG debug),
+  applied cleanly against the real dev database alongside the untouched
+  car schema (`V1`–`V5`).
+- `pipelines/embeddings/ingest_motorcycle_knowledge.py`: real ingestion
+  of the 29 real Yamaha knowledge files → 895 chunks, 588 deterministic
+  facts, idempotent (re-run reports 29/29 unchanged, 0 API calls),
+  measured cost **$0.001351** for the full corpus.
+- Dynamic catalog API (`/api/motorcycles/*`), garage API
+  (`/api/garage/vehicles/*`), motorcycle chat API (`/api/moto-sessions/*`),
+  all ownership-scoped to the existing `VisitorContext` cookie.
+- Hard-filtered hybrid RAG (`MotoRetrievalService`) — contamination tests
+  pass against the real ingested corpus (MT-07 vs MT-09, MT-09 vs MT-09
+  SP, year-range boundaries), both as Testcontainers integration tests
+  and live through a real browser session (Evidence & Debug drawer
+  showed all 6 retrieved chunks under the exact selected model/year,
+  every time, across multiple bikes/questions).
+- Controlled chat actions (maintenance event / odometer update /
+  preference) — live-verified: a real chat turn ("I actually just
+  lubricated the chain today at 15000 km") produced both a persisted
+  `CHAIN_LUBE` maintenance event and an odometer update; a hypothetical
+  question ("what if I were at 30,000 km?") produced **zero** writes.
+- Maintenance dashboard status calculation
+  (`MaintenanceStatusService`) — live-verified against the spec's own
+  worked example: odometer 23,500 km, last oil change 19,000 km, 6,000 km
+  interval → dashboard showed `Engine oil: OK — Last: 19,000 km, 1,500 km
+  remaining`, with every other service type honestly `Unknown`.
+- Full frontend rebuild for the motorcycle product: landing page, bike
+  picker (manufacturer → model → year, fully dynamic), chat UX with
+  bike-aware header + "Change bike", My Garage list, per-bike maintenance
+  dashboard, evidence/debug drawer — all live-tested in a real browser
+  end to end (see `docs/retrieval-evaluation.md` for the full walkthrough).
+- Tests: 48/48 Python (`pytest`), full Java suite (`./mvnw test`,
+  including the pre-existing car suite — no regression), `next build` +
+  `tsc --noEmit` clean.
+
+**Known limitations** (see the final engineering report in this
+session's conversation for the complete list): no automated Playwright
+test was added for the new motorcycle frontend flow (verified manually
+instead); the deterministic facts layer covers a meaningful but partial
+subset of possible fact types; controlled AI actions are schema-level
+proposals validated post-generation rather than a full mid-generation
+tool-calling loop (a deliberate, documented simplification — see
+`docs/repair-v2-architecture.md` section 5); mobile responsiveness was
+not separately re-verified for the new pages (inherited the same
+responsive classes as the car UI, not independently tested at narrow
+viewport this session).
+
+---
+
+## Car prototype history (preserved, not modified this session)
 
 ## This session: three bug fixes (chat scroll, catalogue pagination, demo vehicle)
 

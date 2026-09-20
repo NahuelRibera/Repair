@@ -38,3 +38,9 @@ __pycache__/
 .idea/
 *.log
 /.logs/
+
+# Local reference images
+docs/reference-images/
+
+# Generated test artifacts
+pipelines/test-results/
