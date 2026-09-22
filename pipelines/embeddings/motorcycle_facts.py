@@ -415,6 +415,9 @@ def _extract_spark_plug_interval(body: str) -> list[Fact]:
       700) — the km interval is the real, stated difference between the
       two replace points (25,000 - 13,000 = 12,000 km); no months figure
       is cleanly derivable from that wording, so only km is emitted.
+      The first stated replace point is also emitted as
+      SPARK_PLUG_SCHEDULE_START_KM: these are fixed manufacturer schedule
+      points, and the dashboard needs the anchor, not just the spacing.
 
     Both derivations use only numbers actually present in the source
     text — never an invented or interpolated value.
@@ -440,14 +443,18 @@ def _extract_spark_plug_interval(body: str) -> list[Fact]:
         first_km = _num(two_point.group(1))
         second_km = _num(two_point.group(2))
         if second_km > first_km:
-            return [Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", second_km - first_km, None, "km", two_point.group(0).strip())]
+            raw = two_point.group(0).strip()
+            return [
+                Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", second_km - first_km, None, "km", raw),
+                Fact("SPARK_PLUG_SCHEDULE_START_KM", first_km, None, "km", raw),
+            ]
 
     return []
 
 
 _OIL_FILTER_POINTS_RE = re.compile(
     r"eplacement points:\*\*\s*\n"
-    r"-\s*[\d,]+\s*km or \d+\s*months?\.\s*\n"
+    r"-\s*([\d,]+)\s*km or \d+\s*months?\.\s*\n"
     r"-\s*([\d,]+)\s*km or (\d+)\s*months?\.\s*\n"
     r"-\s*([\d,]+)\s*km or (\d+)\s*months?\.",
     re.IGNORECASE,
@@ -462,19 +469,26 @@ def _extract_oil_filter_interval(body: str) -> list[Fact]:
     a first-service point, then two steady-state points whose difference
     is the real, stated repeating interval (e.g. 25,000 - 13,000 = 12,000
     km; 24 - 12 = 12 months) — derived from numbers actually in the
-    source, never invented.
+    source, never invented. The first-service point and the first
+    steady-state point are also emitted as-is (OIL_FILTER_INITIAL_POINT_KM,
+    OIL_FILTER_SCHEDULE_START_KM) so the dashboard can place the fixed
+    manufacturer schedule points instead of assuming they start at zero.
     """
     match = _OIL_FILTER_POINTS_RE.search(body)
     if not match:
         return []
-    second_km, second_months, third_km, third_months = (
-        _num(match.group(1)), int(match.group(2)), _num(match.group(3)), int(match.group(4))
+    first_km, second_km, second_months, third_km, third_months = (
+        _num(match.group(1)), _num(match.group(2)), int(match.group(3)), _num(match.group(4)), int(match.group(5))
     )
+    raw = match.group(0).strip()
     facts: list[Fact] = []
     if third_km > second_km:
-        facts.append(Fact("OIL_FILTER_INTERVAL_KM", third_km - second_km, None, "km", match.group(0).strip()))
+        facts.append(Fact("OIL_FILTER_INTERVAL_KM", third_km - second_km, None, "km", raw))
+        if first_km < second_km:
+            facts.append(Fact("OIL_FILTER_INITIAL_POINT_KM", first_km, None, "km", raw))
+        facts.append(Fact("OIL_FILTER_SCHEDULE_START_KM", second_km, None, "km", raw))
     if third_months > second_months:
-        facts.append(Fact("OIL_FILTER_INTERVAL_MONTHS", float(third_months - second_months), None, "months", match.group(0).strip()))
+        facts.append(Fact("OIL_FILTER_INTERVAL_MONTHS", float(third_months - second_months), None, "months", raw))
     return facts
 
 

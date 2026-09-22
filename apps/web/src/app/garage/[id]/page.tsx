@@ -19,6 +19,8 @@ const STATUS_STYLES: Record<MaintenanceStatus, { label: string; className: strin
   DUE: { label: "Due", className: "bg-orange-50 text-orange-800 border-orange-200" },
   OVERDUE: { label: "Overdue", className: "bg-red-50 text-red-700 border-red-200" },
   INTERVAL_KNOWN_NO_HISTORY: { label: "Interval known", className: "bg-blue-50 text-blue-700 border-blue-200" },
+  CONDITION_BASED: { label: "Condition-based", className: "bg-slate-50 text-slate-700 border-slate-300" },
+  TRACKED: { label: "Tracked", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   UNKNOWN: { label: "Unknown", className: "bg-gray-100 text-gray-600 border-gray-300" },
   DATA_INCONSISTENT: { label: "Check data", className: "bg-red-50 text-red-700 border-red-200" },
 };
@@ -209,12 +211,12 @@ function StatusCardView({ card }: { card: MaintenanceStatusCard }) {
           {style.label}
         </span>
       </div>
-      {card.status === "UNKNOWN" ? (
+      {card.status === "UNKNOWN" || card.status === "CONDITION_BASED" || card.status === "TRACKED" ? (
         <div className="text-xs text-muted space-y-0.5">
           <p>{card.note ?? "Not enough data yet"}</p>
-          {/* UNKNOWN means "no verified interval for this service" — it does NOT mean
-              "no history". A completed service (e.g. a tire replacement, which has no
-              fixed interval) is still real maintenance history and must stay visible
+          {/* None of these statuses has an interval to calculate from, but that does NOT
+              mean "no history". A completed service (e.g. a condition-based tire
+              replacement) is still real maintenance history and must stay visible
               here; only the interval/due-date calculation is unavailable. */}
           {card.lastOdometerKm != null && <p>Last: {Math.round(card.lastOdometerKm).toLocaleString()} km</p>}
           {card.lastPerformedAt && <p>On: {card.lastPerformedAt}</p>}
@@ -225,7 +227,9 @@ function StatusCardView({ card }: { card: MaintenanceStatusCard }) {
         <div className="text-xs text-muted space-y-0.5">
           {card.intervalKm != null && <p>Interval: every {Math.round(card.intervalKm).toLocaleString()} km</p>}
           {card.intervalMonths != null && <p>Interval: every {Math.round(card.intervalMonths)} months</p>}
-          {card.remainingKm != null && (
+          {card.scheduledNextKm != null ? (
+            <ManufacturerScheduleLine card={card} />
+          ) : card.remainingKm != null && (
             <p>Next scheduled: ~{Math.round(card.intervalKm ?? 0).toLocaleString()} km · {Math.round(card.remainingKm).toLocaleString()} km remaining</p>
           )}
           <p className="italic">{card.note ?? "No previous service recorded"}</p>
@@ -234,12 +238,45 @@ function StatusCardView({ card }: { card: MaintenanceStatusCard }) {
         <div className="text-xs text-muted space-y-0.5">
           {card.lastOdometerKm != null && <p>Last: {Math.round(card.lastOdometerKm).toLocaleString()} km</p>}
           {card.lastPerformedAt && <p>On: {card.lastPerformedAt}</p>}
-          {card.remainingKm != null && (
-            <p>{card.remainingKm >= 0 ? `${Math.round(card.remainingKm).toLocaleString()} km remaining` : `${Math.round(-card.remainingKm).toLocaleString()} km overdue`}</p>
+          {card.scheduledNextKm != null ? (
+            <>
+              {/* Two distinct figures for fixed-schedule services: the status above comes from the
+                  recorded service; the manufacturer point is shown alongside, never merged in. */}
+              {card.remainingKm != null && card.lastOdometerKm != null && card.intervalKm != null && (
+                <p>
+                  Based on recorded service: next at {Math.round(card.lastOdometerKm + card.intervalKm).toLocaleString()} km ·{" "}
+                  {formatRemaining(card.remainingKm)}
+                </p>
+              )}
+              <ManufacturerScheduleLine card={card} />
+              {card.note && <p className="italic">{card.note}</p>}
+            </>
+          ) : card.remainingKm != null && (
+            <p>{formatRemaining(card.remainingKm)}</p>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function formatRemaining(remainingKm: number) {
+  return remainingKm >= 0
+    ? `${Math.round(remainingKm).toLocaleString()} km remaining`
+    : `${Math.round(-remainingKm).toLocaleString()} km overdue`;
+}
+
+function ManufacturerScheduleLine({ card }: { card: MaintenanceStatusCard }) {
+  if (card.scheduledNextKm == null) return null;
+  const remaining = card.scheduledRemainingKm;
+  return (
+    <p>
+      Manufacturer schedule: next point at {Math.round(card.scheduledNextKm).toLocaleString()} km
+      {remaining != null &&
+        (remaining >= 0
+          ? ` · ${Math.round(remaining).toLocaleString()} km remaining`
+          : ` · passed ${Math.round(-remaining).toLocaleString()} km ago`)}
+    </p>
   );
 }
 

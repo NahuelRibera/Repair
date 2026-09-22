@@ -264,7 +264,9 @@ silently look like the other.
 per service type:
 
 ```
-UNKNOWN                    no verified interval fact for this bike at all
+UNKNOWN                    no verified interval fact and no recorded history
+CONDITION_BASED            no fixed interval by design (tires, chain adjustment, battery)
+TRACKED                    no verified interval, but a previous service is recorded
 INTERVAL_KNOWN_NO_HISTORY  interval is verified, but no previous service is recorded
 OK                         > 20% of the interval remains
 DUE_SOON                   0–20% of the interval remains
@@ -291,6 +293,39 @@ independently when both exist for a service type; whichever produces the
 more urgent status wins, per the "whichever comes first" rule. Worked
 numeric examples are covered in `MaintenanceStatusServiceTest`.
 
+### Resettable intervals vs. manufacturer schedule points
+
+Most services are **resettable**: the next due point is the last recorded
+service plus the interval (engine oil "every 6,000 km or 6 months" stays
+this way). Some knowledge files instead list **fixed manufacturer
+schedule points** — MT-07 2021 replaces the oil filter at 1,000, 13,000
+and 25,000 km and spark plugs at 13,000 and 25,000 km, then repeats every
+12,000 km. For those (`SCHEDULE_START_FACT` / `INITIAL_POINT_FACT` in
+`MaintenanceStatusService`, backed by `OIL_FILTER_INITIAL_POINT_KM`,
+`OIL_FILTER_SCHEDULE_START_KM` and `SPARK_PLUG_SCHEDULE_START_KM`):
+
+- The status and remaining figures stay **based on recorded service**
+  (last event + 12,000 km).
+- The card separately shows the **manufacturer schedule** point
+  (`scheduledNextKm`): the first point after the last recorded service,
+  or, with no history, the first point at or after the current odometer.
+  With no history the old "interval mark from zero" guess (12,000 km) is
+  not used for these services — it isn't a point in the schedule.
+- When the two differ (a service done early or late), the card says so
+  instead of silently picking one. The source defines no tolerance for
+  an early or late service, so none is applied.
+- Only km points are anchored. Time-based schedule points depend on the
+  bike's in-service date, which isn't recorded, so the months interval
+  stays resettable from the last recorded service date.
+- Repeat cycles beyond 25,000 km (37,000, 49,000, ...) follow the file's
+  repeat note read as "37,000 km is the 13,000 km service again" — the
+  same reading the 12,000 km interval itself rests on.
+
+The UI labels these "Based on recorded service" and "Manufacturer
+schedule". Covered by the `schedule_*` tests in
+`MaintenanceStatusServiceTest` (no history, early, on-point, late and
+later-cycle services, for both oil filter and spark plugs).
+
 ### Fact-to-service mapping
 
 `KM_INTERVAL_FACT` / `MONTH_INTERVAL_FACT` in `MaintenanceStatusService`
@@ -311,16 +346,22 @@ it. As of this QA pass:
 
 The last three are genuinely condition/wear-based in the real knowledge
 base (e.g. "check before each ride, adjust when outside spec"), not
-scheduled intervals — they correctly stay `UNKNOWN` rather than getting a
-fabricated number. The oil-filter and spark-plug km/months figures are
+scheduled intervals — they show `CONDITION_BASED` ("Condition-based")
+rather than getting a fabricated number, with any recorded replacement
+still shown as history. Any other service type without an interval fact
+shows `TRACKED` when history exists and `UNKNOWN` only when nothing is
+recorded. The oil-filter and spark-plug km/months figures are
 *derived* (never fabricated) from real consecutive numbers in the source
 Markdown — e.g. spark-plug replacement points "13,000 and 25,000 km" ⇒
 12,000 km interval — see `docs/knowledge-ingestion.md` and
 `pipelines/embeddings/motorcycle_facts.py`'s `_extract_spark_plug_interval`
 / `_extract_oil_filter_interval`. Covered by
 `MaintenanceStatusServiceTest.factMappingMatrix_recognizesEveryExtractedIntervalType`
-and `serviceTypesWithNoExtractableInterval_gracefullyStayUnknown`, and by
-`pipelines/tests/test_motorcycle_facts.py` against the real Yamaha corpus.
+and `conditionBasedServiceTypes_areConditionBasedNotUnknown`, and by
+`pipelines/tests/test_motorcycle_facts.py` against the real Yamaha corpus
+(including `test_mt07_2021_keeps_its_explicit_maintenance_schedule_facts`,
+which guards MT-07 2021's oil-filter, spark-plug and drive-chain facts
+after a knowledge rewrite once dropped them).
 
 ## Context relevance and provenance separation
 

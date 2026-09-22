@@ -88,10 +88,10 @@ test.describe("maintenance persistence survives reload and a brand-new chat", ()
 
       // Tires has no verified interval (condition-based) but the completed
       // replacement is still real history — status card must show "Last"
-      // even though it stays Unknown (the reported bug: this used to
-      // disappear entirely for any UNKNOWN-status card).
+      // alongside the Condition-based badge (the reported bug: history used
+      // to disappear entirely for any card without an interval).
       const tiresCard = page.getByText("Tires").locator("..").locator("..");
-      await expect(tiresCard.getByText("Unknown")).toBeVisible();
+      await expect(tiresCard.getByText("Condition-based")).toBeVisible();
       await expect(tiresCard.getByText("Last: 23,300 km")).toBeVisible();
 
       const oilFilterCard = page.getByText("Oil filter", { exact: true }).locator("..").locator("..");

@@ -228,6 +228,8 @@ export interface MaintenanceEvent {
 
 export type MaintenanceStatus =
   | "UNKNOWN"
+  | "CONDITION_BASED"
+  | "TRACKED"
   | "INTERVAL_KNOWN_NO_HISTORY"
   | "OK"
   | "DUE_SOON"
@@ -245,6 +247,11 @@ export interface MaintenanceStatusCard {
   intervalMonths: number | null;
   remainingMonths: number | null;
   note: string | null;
+  /** Next fixed manufacturer schedule point (km), only for services whose
+   * knowledge file lists fixed points (oil filter, spark plugs on MT-07).
+   * Separate from — never a replacement for — the recorded-service figures. */
+  scheduledNextKm: number | null;
+  scheduledRemainingKm: number | null;
 }
 
 export interface VehiclePreference {

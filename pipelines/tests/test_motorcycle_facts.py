@@ -5,6 +5,7 @@ from pathlib import Path
 from embeddings.motorcycle_facts import extract_facts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MT07_2021 = REPO_ROOT / "knowledge/motorcycles/yamaha/mt-07/2021.md"
 MT07_2025 = REPO_ROOT / "knowledge/motorcycles/yamaha/mt-07/2025.md"
 MT09_2025 = REPO_ROOT / "knowledge/motorcycles/yamaha/mt-09/2025.md"
 TENERE_700_2025 = REPO_ROOT / "knowledge/motorcycles/yamaha/tenere-700/2025.md"
@@ -47,6 +48,37 @@ def test_extract_facts_against_real_mt07_file():
     assert facts["OIL_FILTER_INTERVAL_MONTHS"].value_numeric == 12
 
 
+def test_mt07_2021_keeps_its_explicit_maintenance_schedule_facts():
+    # Regression guard: a knowledge rewrite once replaced MT-07 2021's
+    # explicit oil-filter/spark-plug service points and chain specs with
+    # number-free prose ("alternating scheduled service points", "Not
+    # specified in this curated file"), which silently turned the My
+    # Garage oil-filter and spark-plug cards into "Unknown". The other
+    # MT-07 test above only reads 2025.md, so it didn't catch that.
+    body = MT07_2021.read_text(encoding="utf-8")
+    facts = _facts_by_type(body)
+
+    # Oil filter: 13,000 km / 12 months -> 25,000 km / 24 months.
+    assert facts["OIL_FILTER_INTERVAL_KM"].value_numeric == 12000
+    assert facts["OIL_FILTER_INTERVAL_MONTHS"].value_numeric == 12
+    # The fixed manufacturer points themselves, not just their spacing:
+    # 1,000 km initial service, regular points from 13,000 km.
+    assert facts["OIL_FILTER_INITIAL_POINT_KM"].value_numeric == 1000
+    assert facts["OIL_FILTER_SCHEDULE_START_KM"].value_numeric == 13000
+    # Spark plugs: "Replace at 13,000 and 25,000 km".
+    assert facts["SPARK_PLUG_REPLACE_INTERVAL_KM"].value_numeric == 12000
+    assert facts["SPARK_PLUG_SCHEDULE_START_KM"].value_numeric == 13000
+    assert "SPARK_PLUG_REPLACE_INTERVAL_MONTHS" not in facts
+    assert facts["SPARK_PLUG_MODEL"].value_text == "NGK LMAR8A-9."
+    assert facts["SPARK_PLUG_GAP_MM"].value_text == "0.8-0.9 mm"
+    assert facts["SPARK_PLUG_TORQUE_NM"].value_numeric == 13
+    # Drive chain.
+    assert facts["CHAIN_SLACK_MM"].value_text == "51.0-56.0 mm"
+    assert facts["CHAIN_LUBE_INTERVAL_KM"].value_numeric == 1000
+    assert facts["REAR_AXLE_TORQUE_NM"].value_numeric == 105
+    assert facts["CHAIN_ADJUSTER_LOCKNUT_TORQUE_NM"].value_numeric == 16
+
+
 def test_extract_facts_against_real_mt09_simple_spark_plug_wording():
     # MT-09 uses the simpler "Replace every 19,000 km or 18 months" form —
     # both km and months are directly stated, not derived.
@@ -55,6 +87,9 @@ def test_extract_facts_against_real_mt09_simple_spark_plug_wording():
 
     assert facts["SPARK_PLUG_REPLACE_INTERVAL_KM"].value_numeric == 19000
     assert facts["SPARK_PLUG_REPLACE_INTERVAL_MONTHS"].value_numeric == 18
+    # A plain "every X km" interval states no fixed schedule points, so
+    # none may be emitted — the dashboard keeps treating it as resettable.
+    assert "SPARK_PLUG_SCHEDULE_START_KM" not in facts
 
 
 def test_extract_facts_never_fabricates_chain_slack_when_source_gives_no_number():
