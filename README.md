@@ -1,20 +1,21 @@
-# Repair V2
+# Repair
 
-Repair V2 is an AI assisted maintenance companion for motorcycle owners. You choose your bike, ask questions and can record maintenance directly from the chat so it becomes part of a real service history instead of staying buried in a conversation.
+Repair is an AI assisted maintenance companion for motorcycle owners. You choose your bike, ask questions and can record maintenance directly from the chat so it becomes part of a real service history instead of staying buried in a conversation.
 
 This is a portfolio demo rather than a finished commercial product. The goal is to show a complete RAG and persistence workflow from end to end while keeping the scope small enough to test properly.
 
+![Repair landing page with the bike selector for manufacturer, model and year](docs/screenshots/landing.png)
+<p align="center"><em>Repair combines bike-specific maintenance guidance, service tracking and troubleshooting in one application.</em></p>
+
 ## Project story
 
-Repair originally started as a broader vehicle maintenance assistant, with cars as the first direction.
+Repair started as a broader vehicle maintenance assistant, and the first version of the idea included cars.
 
-As I worked on retrieval, ingestion, persistence, maintenance tracking and model specific knowledge, it became clear that trying to cover too many vehicles at once made the system harder to validate. A smaller domain made it much easier to check whether the retrieval was actually relevant, whether structured maintenance data was reliable and whether the whole flow worked consistently.
+As the work moved into retrieval, ingestion, persistence and structured maintenance data, the quality of the knowledge behind each answer became the main thing to get right. With a wide vehicle range it was hard to check whether retrieval was actually relevant for a specific vehicle, or whether an extracted service interval could be trusted.
 
-For V2 I narrowed the project to motorcycles and, for the current demo, to a curated set of popular Yamaha models and supported years.
+So I narrowed the active demo to motorcycles, and for now to a curated set of Yamaha models. A smaller domain made it practical to curate and validate the knowledge base model by model and year by year. That in turn made it possible to test retrieval against known content, extract structured maintenance facts deterministically, trace every answer back to the chunks it used, persist service history per bike and build service-status logic on top of verified data.
 
-That gave me a cleaner knowledge base to work with and a better environment for building the RAG pipeline, ingestion process, structured fact extraction and maintenance logic properly.
-
-The architecture is still data driven. Manufacturer, model and year are treated as first class dimensions, so the project can grow later without having to rebuild the core application.
+The architecture is still manufacturer, model and year driven. Those are first class dimensions in the schema, the knowledge layout and the retrieval filters, so coverage can grow later without rebuilding the core application.
 
 ## What it does
 
@@ -32,11 +33,38 @@ The architecture is still data driven. Manufacturer, model and year are treated 
 
 7. Distinguish confirmed maintenance from hypothetical, planned or uncertain statements so those messages do not accidentally become service records.
 
-8. View maintenance history and service status using structured facts when verified interval data exists for that bike.
+8. View maintenance history and a per-service status for each bike. Status is calculated where a verified interval exists, shown as condition-based for items such as tires that have no fixed interval, and left unknown only when verified information is missing.
 
 9. Sign in with Google and keep garage vehicles, conversations and maintenance records isolated by user.
 
 10. Delete a motorcycle together with the data that belongs to it.
+
+## Product walkthrough
+
+The examples below follow one Yamaha MT-07 2021 through a typical session.
+
+### Missing context
+
+Asking whether a service is due depends on information the model cannot know on its own. When the current odometer or the last service is missing, Repair asks for it rather than assuming a mileage.
+
+![Repair asking for the current odometer and last oil change before answering whether an oil service is due](docs/screenshots/clarification.png)
+<p align="center"><em>When required context is missing, Repair asks for the rider's maintenance history instead of guessing.</em></p>
+
+### Grounded answer
+
+Once the rider gives the odometer (12,400 km) and the last oil change (8,500 km), the answer combines the verified engine oil interval for that model and year with the bike's own history. It works out what remains before the next service and adds safe checks, cautions and a follow-up question.
+
+![Repair calculating the remaining distance to the next engine oil service from the verified interval, current odometer and last oil change](docs/screenshots/grounded-oil-service.png)
+<p align="center"><em>Repair combines verified model-specific intervals with the motorcycle's actual mileage and service history to calculate what is due next.</em></p>
+
+### Recording maintenance
+
+Completed work described in plain language is turned into structured maintenance events for that motorcycle. The oil change and the filter replacement are stored as separate events. The confirmation shown in the answer is rebuilt from the database after the write, not taken from the model's own wording.
+
+![Repair confirming that an engine oil change and an oil filter change at 12,400 km were recorded](docs/screenshots/maintenance-recorded.png)
+<p align="center"><em>Confirmed maintenance described naturally in chat is converted into structured service history for that motorcycle.</em></p>
+
+The recorded history then feeds My Garage, described under [My Garage and service status](#my-garage-and-service-status), and every answer links to the evidence it was built from, described under [Retrieval](#retrieval).
 
 ## Architecture
 
@@ -69,9 +97,7 @@ flowchart LR
     PIPE -->|embeddings| OPENAI
 ```
 
-The database still contains some of the broader vehicle and car oriented tables from the first version of the idea, including `manufacturers`, `vehicle_models` and `diagnostic_sessions`.
-
-The current motorcycle demo uses the motorcycle specific domain built around `motorcycle_*`, `garage_vehicles` and `moto_chat_*`. The older tables were left in place because they show how the project evolved, but the running motorcycle flow does not depend on them.
+The running application is built around the motorcycle domain: the `motorcycle_*` catalogue and knowledge tables, `garage_vehicles`, `maintenance_events` and the `moto_chat_*` / `moto_rag_*` chat and evidence tables. Some tables from the earlier, broader vehicle prototype are still in the schema; see [Legacy tables](#legacy-tables).
 
 ### Backend (`apps/api`)
 
@@ -85,11 +111,11 @@ Main areas under `dev.repair.api`:
 
 2. `motorcycle` contains the catalogue and structured motorcycle facts.
 
-3. `garage` handles user motorcycles, maintenance events and dashboard logic.
+3. `garage` handles user motorcycles, maintenance events and the service-status logic behind My Garage.
 
-4. `conversation` and `chat` contain the earlier, more general conversation and retrieval pieces from the original vehicle prototype.
+4. `auth` handles Google OAuth2 and OIDC login.
 
-5. `auth` handles Google OAuth2 and OIDC login.
+5. `conversation` and `chat` contain the earlier, more general conversation and retrieval pieces from the original vehicle prototype. The motorcycle flow does not use them.
 
 6. `dataquality`, `catalogue`, `common`, `config` and `web` contain supporting application concerns.
 
@@ -99,13 +125,13 @@ The frontend uses Next.js 16 with the App Router, React 19 and TypeScript.
 
 `next dev` and `next build` proxy `/api/*` to the Spring Boot API through `API_ORIGIN`, so the browser can work through a single origin during local development.
 
-The main routes live under `src/app/chat`, `src/app/garage` and `src/app/quality`.
+The main routes live under `src/app/chat` and `src/app/garage`. `src/app/quality` is a data-quality view left over from the earlier vehicle prototype.
 
 ### Database (`apps/api/src/main/resources/db/migration`)
 
 The database is PostgreSQL with pgvector and Flyway migrations from `V1` to `V11`.
 
-The main parts used by the motorcycle demo are:
+The parts used by the motorcycle application are:
 
 1. **Catalogue**
 
@@ -126,6 +152,10 @@ The main parts used by the motorcycle demo are:
    `moto_chat_sessions` contains `moto_chat_messages`.
 
    Each retrieval run is stored in `moto_rag_runs`, while `moto_retrieved_evidence` keeps the chunks and their vector, text and fused ranking information for the evidence view.
+
+#### Legacy tables
+
+The schema still contains tables from the first, broader vehicle version of the idea, including `manufacturers`, `vehicle_models` and `diagnostic_sessions`. They were left in place because they show how the project evolved, but the running motorcycle flow does not depend on them.
 
 ### Knowledge base (`knowledge/motorcycles`)
 
@@ -175,7 +205,9 @@ These are used for semantic answers and evidence in the chat. They are useful fo
 
 These are used for deterministic behaviour such as service intervals, dashboard status and next due calculations.
 
-If a fact cannot be extracted from a supported pattern, it is simply left unknown rather than guessed.
+Extraction is regex and structure based, never model based. It covers values such as service intervals, oil and coolant capacities, spark plug type and gap, tire pressures and tightening torques. Where a knowledge file lists fixed manufacturer schedule points rather than a plain "every X km" interval, the stated points are extracted as well. For example, the MT-07 2021 file lists oil filter replacement at 1,000, 13,000 and 25,000 km.
+
+If a fact cannot be extracted from a supported pattern, it is simply left unknown rather than guessed. The value is still available to the chat through normal chunk retrieval.
 
 ### Retrieval
 
@@ -187,13 +219,40 @@ Both searches are restricted to the selected motorcycle and year, then combined 
 
 The final ranking and the individual scores are stored in `moto_rag_runs` and `moto_retrieved_evidence`, which is also what powers the evidence and debug view in the interface.
 
+![Evidence and debug panel for a Yamaha MT-07 2021 answer showing the models used, timings and ranked knowledge chunks](docs/screenshots/evidence-debug.png)
+<p align="center"><em>The evidence view exposes the selected motorcycle, model calls, retrieval timings and ranked knowledge chunks used to ground each answer.</em></p>
+
+### My Garage and service status
+
+`MaintenanceStatusService` computes one status card per service type from two inputs: structured facts for the bike's model and year, and the maintenance events recorded for that specific motorcycle. No model is involved in this calculation.
+
+Not every maintenance item has a fixed interval, so the dashboard keeps several cases apart:
+
+1. **Resettable intervals.** Engine oil, for example, is due a fixed distance or time after the last recorded service. With history, the card shows OK, Due soon, Due or Overdue. Without history, it shows Interval known.
+
+2. **Manufacturer schedule points.** Where the knowledge file lists fixed service points, as it does for the MT-07 2021 oil filter and spark plugs, the card shows two separate figures: the next service *based on recorded service*, and the next point on the *manufacturer schedule*. If the last service was done early or late, the card says the two differ rather than silently picking one.
+
+3. **Condition-based items.** Tires, chain adjustment and battery replacement are serviced on inspection and condition, not on a fixed interval. They are labelled Condition-based and still show any recorded replacement.
+
+4. **Missing information.** A service with no verified interval but some recorded history is shown as Tracked. Unknown is used only when there is no verified interval and nothing recorded.
+
+![My Garage for a Yamaha MT-07 2021 showing the odometer and service status cards including OK, Interval known and Condition-based](docs/screenshots/garage-overview.png)
+<p align="center"><em>My Garage combines recorded maintenance, verified service intervals and condition-based items into a live maintenance status for each motorcycle.</em></p>
+
+Maintenance recorded through chat or through the form on this page is stored per motorcycle and listed in order, independent of the conversation it came from.
+
+![Maintenance history for a Yamaha MT-07 2021 listing each recorded service with its mileage and date](docs/screenshots/service-history.png)
+<p align="center"><em>Maintenance captured through conversation becomes a persistent, chronological service history tied to the motorcycle.</em></p>
+
+More detail on the status rules is in `docs/maintenance-tracking.md`.
+
 ### Model calls
 
 `OpenAiClient` is a small HTTP wrapper around the OpenAI API.
 
 It uses `POST /v1/responses` for structured chat generation and `POST /v1/embeddings` for query time and ingestion time embeddings.
 
-The default embedding model is `text-embedding-3-small`.
+The default generation model is `gpt-4.1-mini` and the default embedding model is `text-embedding-3-small`. Both can be overridden with `OPENAI_GENERATION_MODEL` and `OPENAI_EMBEDDING_MODEL`.
 
 ## Local development
 
@@ -291,7 +350,7 @@ npm run test:e2e
 
 ## Current scope and future direction
 
-The current demo focuses on Yamaha and a curated set of models and years.
+The current demo covers Yamaha only: 111 curated model-year files across 20 Yamaha models, with the depth of coverage varying by model.
 
 That scope is intentional. It is large enough to test retrieval, ingestion, persistence and maintenance logic properly, while still being small enough to keep the data controlled and easy to verify.
 
