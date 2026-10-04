@@ -666,17 +666,21 @@ public class MotoChatOrchestrationService {
         // value from BEFORE this turn's writes, so peek at any same-turn
         // proposedOdometerUpdate to compute the real effective ceiling
         // rather than comparing against a stale value.
+        MotoDiagnosticAnswer.ProposedOdometerUpdate odometerProposal = answer.proposedOdometerUpdate() != null
+                ? answer.proposedOdometerUpdate() : deterministicOdometerFallback(userText);
         Double effectiveOdometerCeiling = vehicle.currentOdometerKm();
-        if (answer.proposedOdometerUpdate() != null && "CONFIRMED_COMPLETED".equals(answer.proposedOdometerUpdate().intent())) {
-            Double proposedNewOdometer = validOdometerOrNull(answer.proposedOdometerUpdate().odometerKm());
+        if (odometerProposal != null && "CONFIRMED_COMPLETED".equals(odometerProposal.intent())) {
+            Double proposedNewOdometer = validOdometerOrNull(odometerProposal.odometerKm());
             if (proposedNewOdometer != null && (effectiveOdometerCeiling == null || proposedNewOdometer > effectiveOdometerCeiling)) {
                 effectiveOdometerCeiling = proposedNewOdometer;
             }
         }
 
-        List<MotoDiagnosticAnswer.ProposedMaintenanceEvent> maintenanceProposals = withDeterministicMaintenanceFallback(
-                dedupeProposals(answer.proposedMaintenanceEvents() == null ? List.of() : answer.proposedMaintenanceEvents()),
-                userText);
+        List<MotoDiagnosticAnswer.ProposedMaintenanceEvent> maintenanceProposals = withLabeledLastServiceFallback(
+                withDeterministicMaintenanceFallback(
+                        dedupeProposals(answer.proposedMaintenanceEvents() == null ? List.of() : answer.proposedMaintenanceEvents()),
+                        userText),
+                userText, previousAssistantContext);
 
         // Snapshot each proposed service type's mileage history BEFORE any
         // of this turn's writes happen — the only way to later tell which
@@ -726,7 +730,7 @@ public class MotoChatOrchestrationService {
                             "event mileage (" + odometerKm + " km) exceeds the bike's current odometer ("
                                     + effectiveOdometerCeiling + " km) — service cannot have happened in the future"));
                     valuesToScrub.add(odometerKm);
-                    soleFutureMileageRejection = maintenanceProposals.size() == 1 && answer.proposedOdometerUpdate() == null
+                    soleFutureMileageRejection = maintenanceProposals.size() == 1 && odometerProposal == null
                             && answer.proposedPreference() == null;
                     futureMileageValue = odometerKm;
                     futureMileageCeiling = effectiveOdometerCeiling;
@@ -825,8 +829,8 @@ public class MotoChatOrchestrationService {
                 }
             }
         }
-        if (answer.proposedOdometerUpdate() != null) {
-            var proposal = answer.proposedOdometerUpdate();
+        if (odometerProposal != null) {
+            var proposal = odometerProposal;
             String intent = proposal.intent();
             boolean odometerGuardBlocks = ActionIntentGuard.blocksValueMention(userText, proposal.odometerKm());
             if (!"CONFIRMED_COMPLETED".equals(intent)) {
@@ -1239,6 +1243,119 @@ public class MotoChatOrchestrationService {
                     serviceType, mileage, null, null, "CONFIRMED_COMPLETED", false));
         }
         return merged != null ? merged : modelProposals;
+    }
+
+    /** Deterministic backstops for the terse reply a rider gives to Repair's
+     * own "what's your current odometer / when was the last change?"
+     * follow-up — live QA: "current odometer 15000 and last change 12000"
+     * produced NO proposals at all (the model treated the numbers as
+     * read-only context for its due-date answer), so nothing reached the
+     * Garage even though the answer itself echoed both values back. The
+     * generic fallback above can't catch it: there's no completed-action
+     * verb, two distinct numbers, and the service type is only named in
+     * Repair's previous question, not in this message.
+     *
+     * Both only ever attach a number to an explicit label directly in front
+     * of it ("odometer 15000", "last change 12000") — never guess which of
+     * several bare numbers means what — and only add a proposal the model
+     * didn't make; the result still goes through every existing guard
+     * (intent guard, grounding, future-mileage, lower-than-current,
+     * duplicate) unchanged. Questions and conditional/hedged messages are
+     * skipped outright. */
+    private static final String LABELED_NUMBER =
+            "\\s*[:=]?\\s*(\\d{1,3}(?:,\\d{3})+|\\d{3,7})(?!\\d|,\\d)"
+                    + "(?!\\s*(?:(?:km|kms|kilometers|kilometres)\\s*)?(?:mi|miles|ago|k)\\b)"
+                    + "(\\s*(?:km|kms|kilometers|kilometres)\\b)?";
+    private static final Pattern LABELED_ODOMETER_READING = Pattern.compile(
+            "\\b(?:odometer|odo|mileage)\\b(?:\\s+(?:is|reads|says|shows|now|currently|at))*" + LABELED_NUMBER,
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern LABELED_LAST_SERVICE = Pattern.compile(
+            "\\blast\\s+([a-z ]{0,30}?)\\s*\\b(?:change|service|replacement)\\b(?:\\s+(?:was|at|done))*\\s*@?" + LABELED_NUMBER,
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern CONDITIONAL_TIMING = Pattern.compile("\\b(when|once|until|by the time)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENGINE_OIL_MENTION = Pattern.compile("\\boil\\b(?!\\s+filter)", Pattern.CASE_INSENSITIVE);
+
+    private boolean labeledFallbackApplies(String userText) {
+        return userText != null && !userText.contains("?") && !ActionIntentGuard.blocksAction(userText)
+                && !NEGATIVE_STATEMENT.matcher(userText).find() && !CONDITIONAL_TIMING.matcher(userText).find();
+    }
+
+    /** The labeled number, or null when absent, ambiguous (two different
+     * labeled values), or a bare year-shaped value ("last change 2024"). */
+    private Double soleLabeledValue(Pattern pattern, String text, int numberGroup) {
+        var matcher = pattern.matcher(text);
+        Double candidate = null;
+        while (matcher.find()) {
+            double value = Double.parseDouble(matcher.group(numberGroup).replace(",", ""));
+            boolean hasUnit = matcher.group(numberGroup + 1) != null;
+            if (!hasUnit && value >= 1950 && value <= 2100) {
+                return null;
+            }
+            if (candidate != null && candidate != value) {
+                return null;
+            }
+            candidate = value;
+        }
+        return candidate;
+    }
+
+    private MotoDiagnosticAnswer.ProposedOdometerUpdate deterministicOdometerFallback(String userText) {
+        if (!labeledFallbackApplies(userText)) {
+            return null;
+        }
+        Double value = soleLabeledValue(LABELED_ODOMETER_READING, userText, 1);
+        return value == null ? null : new MotoDiagnosticAnswer.ProposedOdometerUpdate(value, "CONFIRMED_COMPLETED");
+    }
+
+    private List<MotoDiagnosticAnswer.ProposedMaintenanceEvent> withLabeledLastServiceFallback(
+            List<MotoDiagnosticAnswer.ProposedMaintenanceEvent> proposals, String userText, String previousAssistantContext
+    ) {
+        if (!labeledFallbackApplies(userText)) {
+            return proposals;
+        }
+        var matcher = LABELED_LAST_SERVICE.matcher(userText);
+        if (!matcher.find()) {
+            return proposals;
+        }
+        Double mileage = soleLabeledValue(LABELED_LAST_SERVICE, userText, 2);
+        if (mileage == null) {
+            return proposals;
+        }
+        // The service named in the phrase itself ("last oil change 12000")
+        // wins; a bare "last change" resolves against Repair's own
+        // immediately preceding question — and only when that names exactly
+        // one service type.
+        String serviceType = soleServiceTypeMentioned(matcher.group(1));
+        if (serviceType == null && matcher.group(1).isBlank() && previousAssistantContext != null) {
+            serviceType = soleServiceTypeMentioned(previousAssistantContext);
+        }
+        if (serviceType == null) {
+            return proposals;
+        }
+        String resolved = serviceType;
+        if (proposals.stream().anyMatch(p -> resolved.equals(p.serviceType()))) {
+            return proposals;
+        }
+        List<MotoDiagnosticAnswer.ProposedMaintenanceEvent> merged = new ArrayList<>(proposals);
+        merged.add(new MotoDiagnosticAnswer.ProposedMaintenanceEvent(
+                serviceType, mileage, null, null, "CONFIRMED_COMPLETED", false));
+        return merged;
+    }
+
+    /** Exactly one service type named in the text (by its label, plus
+     * plain "oil" — not "oil filter" — for engine oil), else null. */
+    private String soleServiceTypeMentioned(String text) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        Set<String> found = new HashSet<>();
+        DETERMINISTIC_FALLBACK_KEYWORDS.forEach((type, keywords) -> {
+            if (keywords.stream().allMatch(lower::contains)) {
+                found.add(type);
+            }
+        });
+        if (ENGINE_OIL_MENTION.matcher(lower).find()) {
+            found.add("ENGINE_OIL_CHANGE");
+        }
+        return found.size() == 1 ? found.iterator().next() : null;
     }
 
     /** The one, unambiguous mileage-shaped number in the message (reuses

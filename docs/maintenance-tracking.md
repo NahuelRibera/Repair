@@ -198,6 +198,21 @@ from the already-persisted `structured_response` JSON (no schema change).
 See `assistantHistoryReconstructionIncludesThePreviousTurnsFollowUpQuestion`
 and `contextualYesAfterOilFilterFollowUpCreatesOilFilterEventNotAirFilter`.
 
+Live QA also found the model returning no proposals at all for a terse
+answer to its own "odometer / last oil change?" question ("current
+odometer 15000 and last change 12000"). It still echoed both values in
+"Your bike", but nothing was written. Two deterministic backstops in
+`MotoChatOrchestrationService` (`deterministicOdometerFallback`,
+`withLabeledLastServiceFallback`) now derive these proposals when the model
+leaves them out. They only use a number that directly follows an explicit
+label ("odometer 15000", "last change 12000"). A bare "last change" is
+resolved against the previous question only when that question names
+exactly one service type. Questions, hedged or conditional messages,
+relative ("X km ago") values, miles, and year-shaped bare numbers are
+skipped. The resulting proposals go through every guard above unchanged.
+See `terseFollowUpAnswerWithOdometerAndLastOilChangePersistsBothWhenTheModelProposesNothing`
+and `labeledFollowUpFallbackNeverWritesHedgedHypotheticalOrQuestionReplies`.
+
 ### Relative mileage ("X km ago")
 
 The model is instructed to compute the absolute event mileage itself —

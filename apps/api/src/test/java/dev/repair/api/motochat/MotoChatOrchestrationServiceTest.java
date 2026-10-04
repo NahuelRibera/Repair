@@ -1654,4 +1654,84 @@ class MotoChatOrchestrationServiceTest {
         assertThat(systemContent).contains("SCHEDULE VS ACTUAL HISTORY");
         assertThat(systemContent).contains("Never synthesize, back-calculate, or guess a \"last service\" mileage");
     }
+
+    /** The odometer is NOT recorded yet (null), exactly like the reported
+     * Garage vehicle, and Repair's previous turn asked for the odometer and
+     * the last oil change. */
+    private void stubOilChangeFollowUpTurn(String previousAssistantText) {
+        GarageVehicleDto noOdometer = new GarageVehicleDto(
+                GARAGE_VEHICLE_ID, MODEL_ID, "Yamaha", "MT-07", 2025, null, null, null,
+                OffsetDateTime.now(), OffsetDateTime.now());
+        when(garageVehicleRepository.find(VISITOR_ID, GARAGE_VEHICLE_ID)).thenReturn(Optional.of(noOdometer));
+        when(sessionRepository.recentMessages(eq(SESSION_ID), anyInt())).thenReturn(List.of(
+                new MotoMessageDto(1L, "user", "When is my next oil change?", null, OffsetDateTime.now()),
+                new MotoMessageDto(2L, "assistant", previousAssistantText, null, OffsetDateTime.now())
+        ));
+        stubRetrieval();
+        // The model answers correctly but proposes nothing — the live bug.
+        stubGeneration(answerJson(""));
+    }
+
+    private static final String OIL_FOLLOW_UP_QUESTION =
+            "To determine your next oil change due, I need to know your current odometer reading or when you last changed the oil.";
+
+    @Test
+    void terseFollowUpAnswerWithOdometerAndLastOilChangePersistsBothWhenTheModelProposesNothing() {
+        // Exact live regression: "current odometer 15000 and last change
+        // 12000" answered Repair's own question, the answer echoed both
+        // values under "Your bike", but nothing reached the Garage.
+        stubOilChangeFollowUpTurn(OIL_FOLLOW_UP_QUESTION);
+        when(garageVehicleRepository.updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 15000.0)).thenReturn(Optional.of(15000.0));
+        when(maintenanceRepository.createEvent(eq(GARAGE_VEHICLE_ID), eq("ENGINE_OIL_CHANGE"), eq(12000.0), any(), any(), eq("chat")))
+                .thenReturn(1L);
+
+        MotoChatTurnResult result = service.handleUserMessage(
+                VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "current odometer 15000 and last change 12000");
+
+        verify(garageVehicleRepository).updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 15000.0);
+        verify(maintenanceRepository).createEvent(eq(GARAGE_VEHICLE_ID), eq("ENGINE_OIL_CHANGE"), eq(12000.0), any(), any(), eq("chat"));
+        assertThat(result.actionsTaken()).anyMatch(a -> a.type().equals("odometer_updated") && a.odometerKm() == 15000.0);
+        assertThat(result.actionsTaken()).anyMatch(a -> a.type().equals("maintenance_event_created")
+                && a.serviceType().equals("ENGINE_OIL_CHANGE") && a.odometerKm() == 12000.0);
+    }
+
+    @Test
+    void labeledOdometerAloneUpdatesTheOdometerWithoutInventingAnEvent() {
+        stubOilChangeFollowUpTurn(OIL_FOLLOW_UP_QUESTION);
+        when(garageVehicleRepository.updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 15000.0)).thenReturn(Optional.of(15000.0));
+
+        service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "My odometer reads 15,000 km.");
+
+        verify(garageVehicleRepository).updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 15000.0);
+        verify(maintenanceRepository, never()).createEvent(anyLong(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void labeledFollowUpFallbackNeverWritesHedgedHypotheticalOrQuestionReplies() {
+        stubOilChangeFollowUpTurn(OIL_FOLLOW_UP_QUESTION);
+
+        for (String reply : List.of(
+                "current odometer maybe 15000 and last change 12000",
+                "I think the odometer is 15000 and last change 12000",
+                "If my odometer was 15000 and last change 12000, when is the next one due?",
+                "odometer 15000 and last change 12000?",
+                "when the odometer reads 15000 I'll do it",
+                "last change was 3000 km ago",
+                "last change 2024"
+        )) {
+            service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, reply);
+        }
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        verify(maintenanceRepository, never()).createEvent(anyLong(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void bareLastChangeIsNotGuessedWhenThePreviousQuestionNamedSeveralServices() {
+        stubOilChangeFollowUpTurn("When did you last change the oil, and when did you last change the coolant?");
+
+        service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "last change 12000");
+
+        verify(maintenanceRepository, never()).createEvent(anyLong(), any(), any(), any(), any(), any());
+    }
 }
