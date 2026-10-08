@@ -33,7 +33,8 @@ provenance is planned. Until it lands, keep changes compatible with the existing
 - API tests (unit + Testcontainers, needs Docker): `cd apps/api && ./mvnw test`
 - Pipeline tests: `cd pipelines && pip install -e ".[dev]" && pytest`
   (integration tests skip when Postgres on 5544 is unreachable)
-- Web checks: `cd apps/web && npm ci && npm run lint && npx tsc --noEmit && npm run build`
+- Web checks: `cd apps/web && npm ci && npm run lint && npm run typecheck && npm run build`
+  (`typecheck` runs `next typegen` first so generated route types such as `LayoutProps` exist)
 - E2E (API and DB running): `cd apps/web && npm run test:e2e`
 
 CI (`.github/workflows/ci.yml`) runs the API, pipeline and web checks on every pull request.
