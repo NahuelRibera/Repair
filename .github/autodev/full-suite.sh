@@ -21,7 +21,7 @@ python -m pip install -q -e "pipelines[dev]"
 echo "::endgroup::"
 
 echo "::group::Web"
-(cd apps/web && npm ci --no-audit --no-fund && npx tsc --noEmit && npm run build)
+(cd apps/web && npm ci --no-audit --no-fund && npm run build && npx tsc --noEmit)
 # Lint is advisory until the existing react-hooks errors are fixed (see ci.yml web-lint).
 (cd apps/web && npm run lint) || echo "::warning::npm run lint reported problems"
 
