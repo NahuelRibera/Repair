@@ -18,27 +18,38 @@ const AuthContext = createContext<AuthState | null>(null);
  * — shares one GET /api/me call instead of each re-fetching it. A 401
  * here is an entirely normal, expected state (not signed in yet), never
  * logged as an error. */
+/** Resolves to the signed-in user, or null when signed out or on failure. */
+async function fetchCurrentUser(): Promise<AppUser | null> {
+  try {
+    return await api.get<AppUser>("/api/me");
+  } catch (err) {
+    if (!(err instanceof ApiError && err.status === 401)) {
+      console.error("Failed to load the current user", err);
+    }
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    try {
-      const me = await api.get<AppUser>("/api/me");
-      setUser(me);
-    } catch (err) {
-      if (!(err instanceof ApiError && err.status === 401)) {
-        console.error("Failed to load the current user", err);
-      }
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+    setUser(await fetchCurrentUser());
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let active = true;
+    fetchCurrentUser().then((me) => {
+      if (!active) return;
+      setUser(me);
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return <AuthContext.Provider value={{ user, loading, refresh, setUser }}>{children}</AuthContext.Provider>;
 }
