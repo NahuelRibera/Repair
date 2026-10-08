@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { bikeTitle, SERVICE_TYPE_LABELS } from "@/lib/types";
 import type {
@@ -25,6 +25,16 @@ const STATUS_STYLES: Record<MaintenanceStatus, { label: string; className: strin
   DATA_INCONSISTENT: { label: "Check data", className: "bg-red-50 text-red-700 border-red-200" },
 };
 
+type BikeData = [GarageVehicle, MaintenanceStatusCard[], MaintenanceEvent[]];
+
+function fetchBike(id: number): Promise<BikeData> {
+  return Promise.all([
+    api.get<GarageVehicle>(`/api/garage/vehicles/${id}`),
+    api.get<MaintenanceStatusCard[]>(`/api/garage/vehicles/${id}/dashboard`),
+    api.get<MaintenanceEvent[]>(`/api/garage/vehicles/${id}/maintenance`),
+  ]);
+}
+
 export default function GarageVehiclePage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
@@ -39,32 +49,47 @@ export default function GarageVehiclePage() {
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [startingChat, setStartingChat] = useState(false);
 
-  function refresh() {
-    Promise.all([
-      api.get<GarageVehicle>(`/api/garage/vehicles/${id}`),
-      api.get<MaintenanceStatusCard[]>(`/api/garage/vehicles/${id}/dashboard`),
-      api.get<MaintenanceEvent[]>(`/api/garage/vehicles/${id}/maintenance`),
-    ])
-      .then(([v, d, h]) => {
-        setVehicle(v);
-        setDashboard(d);
-        setHistory(h);
-        setOdometerDraft(v.currentOdometerKm != null ? String(Math.round(v.currentOdometerKm)) : "");
-      })
-      .catch((e: unknown) => {
-        if (e instanceof ApiError && e.status === 404) {
-          // The bike no longer exists (e.g. deleted from My Garage in
-          // another tab, or this link is stale) — there's nothing useful
-          // to show here, so send the rider back to the garage list
-          // instead of leaving them on a dead/error page.
-          router.replace("/garage");
-          return;
-        }
-        setLoadError(e instanceof ApiError ? e.message : "Failed to load this bike");
-      });
-  }
+  const applyLoaded = useCallback(([v, d, h]: BikeData) => {
+    setVehicle(v);
+    setDashboard(d);
+    setHistory(h);
+    setOdometerDraft(v.currentOdometerKm != null ? String(Math.round(v.currentOdometerKm)) : "");
+  }, []);
 
-  useEffect(refresh, [id]);
+  const handleLoadError = useCallback(
+    (e: unknown) => {
+      if (e instanceof ApiError && e.status === 404) {
+        // The bike no longer exists (e.g. deleted from My Garage in
+        // another tab, or this link is stale) — there's nothing useful
+        // to show here, so send the rider back to the garage list
+        // instead of leaving them on a dead/error page.
+        router.replace("/garage");
+        return;
+      }
+      setLoadError(e instanceof ApiError ? e.message : "Failed to load this bike");
+    },
+    [router],
+  );
+
+  const refresh = useCallback(() => {
+    fetchBike(id).then(applyLoaded, handleLoadError);
+  }, [id, applyLoaded, handleLoadError]);
+
+  // Load on mount and whenever the bike id changes; responses for a previous id are ignored.
+  useEffect(() => {
+    let active = true;
+    fetchBike(id).then(
+      (data) => {
+        if (active) applyLoaded(data);
+      },
+      (e: unknown) => {
+        if (active) handleLoadError(e);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [id, applyLoaded, handleLoadError]);
 
   async function saveOdometer() {
     const value = Number(odometerDraft);

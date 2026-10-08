@@ -8,6 +8,10 @@ import { bikeTitle } from "@/lib/types";
 import type { MotoSessionSummary } from "@/lib/types";
 import { RepairLogo } from "./RepairLogo";
 
+function fetchSessions(): Promise<MotoSessionSummary[]> {
+  return api.get<MotoSessionSummary[]>("/api/moto-sessions");
+}
+
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -22,15 +26,26 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose:
   async function refresh() {
     setLoading(true);
     try {
-      const results = await api.get<MotoSessionSummary[]>("/api/moto-sessions");
-      setSessions(results);
+      setSessions(await fetchSessions());
     } finally {
       setLoading(false);
     }
   }
 
+  // Reload when the open conversation changes (a new chat appears, a title updates).
+  // The list stays visible while reloading; responses for a superseded activeId are ignored.
   useEffect(() => {
-    refresh();
+    let active = true;
+    fetchSessions()
+      .then((results) => {
+        if (active) setSessions(results);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [activeId]);
 
   useEffect(() => {
