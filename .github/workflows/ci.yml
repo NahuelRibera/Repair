@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: Java API
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with: { distribution: temurin, java-version: "21", cache: maven }
+      - name: Unit and Testcontainers integration tests
+        working-directory: apps/api
+        run: ./mvnw -B -ntp test
+
+  pipelines:
+    name: Python pipelines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      db:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: repair_v2
+          POSTGRES_USER: repair_v2
+          POSTGRES_PASSWORD: repair_v2_local_only
+        ports: ["5544:5432"]
+        options: >-
+          --health-cmd "pg_isready -U repair_v2 -d repair_v2"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.12" }
+      - name: Enable pgvector (V1 is applied outside the per-test schemas)
+        env: { PGPASSWORD: repair_v2_local_only }
+        run: psql -h localhost -p 5544 -U repair_v2 -d repair_v2 -v ON_ERROR_STOP=1 -f apps/api/src/main/resources/db/migration/V1__extensions.sql
+      - name: Install
+        run: python -m pip install -q -e "pipelines[dev]"
+      - name: Tests
+        working-directory: pipelines
+        run: pytest -q
+
+  web:
+    name: Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run build

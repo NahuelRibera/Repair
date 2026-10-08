@@ -1,0 +1,8 @@
+# Changes to automation, security-sensitive code, schema and agent instructions
+# always request the owner's review.
+/.github/                                          @NahuelRibera
+/CLAUDE.md                                         @NahuelRibera
+/apps/api/src/main/resources/db/migration/         @NahuelRibera
+/apps/api/src/main/java/dev/repair/api/config/     @NahuelRibera
+/apps/api/src/main/java/dev/repair/api/auth/       @NahuelRibera
+/docker-compose.yml                                @NahuelRibera

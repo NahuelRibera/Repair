@@ -1,69 +1,78 @@
 # CLAUDE.md
 
-Engineering working notes for continuing work on this repository. A
-portfolio README will be written later, once the owner explicitly asks
-for it — see the non-negotiable below.
+Engineering notes for anyone (human or agent) changing this repository.
 
 ## What this project is
 
-Repair V2: a rebuilt, AI-powered automotive diagnosis demo. Cars only. A
-Python pipeline reconciles a private scraped CSV export and a legacy
-PostgreSQL dump into one canonical catalogue; a Java/Spring API serves the
-catalogue and runs a RAG-based chat diagnosis over a small hand-written
-knowledge corpus; a Next.js app is the UI. See `docs/planning/` for the
-architecture, data-pipeline, and setup writeups.
+Repair is a motorcycle maintenance companion: pick a bike from the catalogue, keep it in
+a personal garage, ask maintenance and troubleshooting questions answered with retrieval
+scoped to that exact manufacturer, model and year, and record completed maintenance from
+chat or forms into a per-bike service history with deterministic service status.
 
-## Non-negotiables (carried over from the original task spec)
+The active product is the motorcycle flow. Coverage today is Yamaha only (model-year
+Markdown files under `knowledge/motorcycles/`). The car prototype that preceded it still
+lives in the code (`chat`, `conversation`, `catalogue`, `dataquality` packages, the
+`/quality` page and tables from V1–V5); it is legacy and must not be extended.
 
-- Everything authored (code, comments, UI copy, docs) is in English.
-- **Do not create or modify any project README.md until the owner
-  explicitly requests it.** (A README was mistakenly created once during
-  this project's history and was removed — this rule stands regardless of
-  what seems otherwise implied by "finish the portfolio" style requests.)
-  Engineering notes and local setup instructions belong in
-  `docs/planning/` instead.
-- Never touch the owner's original local `repair_db` PostgreSQL database.
-  This project's own Postgres runs in Docker on port 5544, never 5432.
-- Never commit `data/raw/` (the private dataset), `.env`, credentials, or
-  local database volumes.
-- Never fabricate test results, live-verification claims, dataset
-  provenance, or mechanical facts (torques, fuse numbers, service
-  intervals, OEM specs) not backed by a real source. See
-  `docs/planning/data-findings.md` for what's actually been verified about
-  the source data, and label synthetic knowledge-corpus content as such.
-- Citations in chat answers must only ever reference chunk ids that were
-  actually retrieved for that turn — validated server-side in
-  `ChatOrchestrationService.validateCitations`, not just trusted from the
-  model's output.
+The current catalogue schema is not final: a canonical motorcycle model with per-value
+provenance is planned. Until it lands, keep changes compatible with the existing tables.
 
-## Where things live
+## Stack and layout
 
-- `data/raw/` — private inputs, git-ignored. `data/fixtures/` — small
-  public subset used by automated tests when the private data isn't
-  present.
-- `data/knowledge/` — the hand-written Markdown knowledge corpus.
-- `pipelines/` — Python ingestion + embeddings CLI (`ingest.cli`).
-- `apps/api/` — Java 21 / Spring Boot 4.1 API. JDBC (no JPA), Flyway
-  migrations in `src/main/resources/db/migration`.
-- `apps/web/` — Next.js 16 / React 19 / Tailwind 4 frontend.
-- `docs/planning/` — data findings, local dev instructions, status log.
-  These are working notes, not marketing copy.
+- `apps/api/` — Java 21, Spring Boot 4.1, plain JDBC via `JdbcClient` (no JPA), Flyway
+  migrations in `src/main/resources/db/migration`, Spring Security with Google OAuth2.
+- `apps/web/` — Next.js 16 App Router, React 19, TypeScript, Tailwind 4.
+- `pipelines/` — Python ingestion and embedding CLI (`python -m ingest.cli`).
+- `knowledge/motorcycles/<manufacturer>/<model>/<year>.md` — curated knowledge base.
+- `docs/` — architecture and design notes; `docs/planning/` holds working notes.
+- PostgreSQL 17 + pgvector runs from `docker-compose.yml` on host port 5544.
 
-## Current status
+## Commands
 
-See `docs/planning/status.md` for exactly what's verified vs. not, and why.
-As of the last update: full vertical slice implemented and tested (Python:
-37 pytest tests; Java: 24 JUnit/Testcontainers tests; web: Playwright golden
-path). A real `OPENAI_API_KEY` is now configured and **live RAG has been
-verified end-to-end**: real embeddings for the 8-document/37-chunk
-knowledge corpus, real `gpt-4.1-mini` generation calls, grounded answers
-with citations that genuinely support their claims, follow-up context
-retention, and — importantly — live confirmation that a different BMW
-generation (G20 330i) does not retrieve the E90-N47-specific document.
-Total measured spend for the verification session: ≈$0.006.
+- Database: `docker compose up -d db`
+- API tests (unit + Testcontainers, needs Docker): `cd apps/api && ./mvnw test`
+- Pipeline tests: `cd pipelines && pip install -e ".[dev]" && pytest`
+  (integration tests skip when Postgres on 5544 is unreachable)
+- Web checks: `cd apps/web && npm ci && npm run lint && npx tsc --noEmit && npm run build`
+- E2E (API and DB running): `cd apps/web && npm run test:e2e`
 
-## Local development
+CI (`.github/workflows/ci.yml`) runs the API, pipeline and web checks on every pull request.
 
-See `docs/planning/local-development.md` for exact commands (start the DB,
-import the catalogue, ingest the knowledge corpus, run each app, run each
-test suite).
+## Non-negotiables
+
+- Everything authored in the repository (code, comments, UI copy, docs, commit messages) is in English.
+- Never fabricate mechanical facts (torques, capacities, intervals, specifications), test
+  results, live-verification claims or data provenance. A value without a reliable source
+  stays unknown. Never copy a value from one model year or variant to another without a
+  source that explicitly covers both.
+- Knowledge content is our own structured wording of verifiable facts; do not reproduce
+  copyrighted text from manuals or websites.
+- Structured facts are extracted deterministically (regex/structure), never by a model.
+- Chat citations may only reference chunks actually retrieved for that turn; this is
+  validated server-side (`MotoChatOrchestrationService`, `MotoDiagnosticAnswer`).
+- Maintenance writes from chat must stay behind `ActionIntentGuard`: hypothetical,
+  planned or uncertain statements never become service records.
+- Every garage, chat and maintenance query is scoped by the authenticated `user_id`.
+- Never commit `.env`, credentials, `data/raw/` or database volumes. Never point anything
+  at the owner's local `repair_db` database; this project uses its own database on port 5544.
+- Tests must never call OpenAI; stub the network boundary.
+- Migrations are additive. Dropping or rewriting tables or columns requires the owner's
+  explicit approval in the pull request.
+
+## Documentation
+
+Keep `README.md` accurate: update it when a change alters features, setup, configuration,
+architecture, the database or commands. Describe only what is implemented and verified;
+plans go under a clearly marked roadmap. No promotional text and no tool attributions.
+
+## Contributions and automation
+
+- Work happens on branches and pull requests; `main` is protected. No force pushes and no
+  history rewriting. Commit dates are never altered.
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`,
+  `docs:`, `perf:`, `chore:`, `ci:`, `build:`), imperative mood, one coherent change per commit.
+- Automated changes are produced by the autodev system: the agent runs in an isolated
+  GitHub Actions job and publishes through the autodev GitHub App, so its commits and pull
+  requests are attributed to that bot and labelled `autodev`.
+- Automated sessions must not modify `.github/`, this file, migrations that drop data, or
+  security configuration without an explicit, approved task.
