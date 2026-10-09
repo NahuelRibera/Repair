@@ -158,41 +158,78 @@ jobs:
             --settings "$RUNNER_TEMP/autodev/settings.json" \
             --output-format stream-json --verbose \
             > "$RUNNER_TEMP/autodev/transcript.jsonl" 2> "$RUNNER_TEMP/autodev/stderr.log"
-          echo "claude exit code: $?"
+          rc=$?
+          echo "$rc" > "$RUNNER_TEMP/autodev/claude-exit-code"
+          echo "claude exit code: $rc"
           # The transcript is never printed: public repository logs are world-readable.
 
       - name: Collect patch and usage report
         id: collect
         if: always()
         run: |
-          set -euo pipefail
+          set -uo pipefail
           A="$RUNNER_TEMP/autodev"
-          # Neutralise anything the session may have planted in git configuration or hooks.
-          cp "$A/git-config.orig" .git/config
-          G=(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c core.pager=cat)
-          "${G[@]}" add -A -- . ':!.autodev-out'
-          "${G[@]}" diff --cached --binary --no-ext-diff --no-textconv > "$A/patch.diff" || true
-          python3 "$A/streamjson.py" "$A/transcript.jsonl" > "$A/usage.json" 2>/dev/null || echo '{}' > "$A/usage.json"
-          if [ -f .autodev-out/summary.json ] && jq -e 'type=="object"' .autodev-out/summary.json >/dev/null 2>&1; then
-            jq '{outcome, commit_title, commit_body, notes} | with_entries(.value |= (tostring | .[0:4000]))' \
-              .autodev-out/summary.json > "$A/summary.json"
-          else
-            echo '{}' > "$A/summary.json"
+          OUT=.autodev-out          # session notes; never part of the patch
+          mkdir -p "$A"
+          # Every artifact file exists from the start, so a failure below is reported as itself
+          # instead of being hidden by a secondary "no files found" upload error.
+          : > "$A/patch.diff"; echo '{}' > "$A/summary.json"; echo '{}' > "$A/usage.json"
+          fail() {  # fail <stage> <message>: record the cause in usage.json and fail the step
+            echo "::error title=autodev collect (${1})::${2}"
+            jq --arg s "$1" --arg m "$2" '. + {collect_error: {stage: $s, message: $m}}' "$A/usage.json" > "$A/u.tmp" \
+              && mv "$A/u.tmp" "$A/usage.json"
+            : > "$A/patch.diff"
+            echo "has_patch=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          }
+
+          # 1) Usage summary first: it does not depend on git and is what the coordinator needs most.
+          if [ -s "$A/transcript.jsonl" ]; then
+            python3 "$A/streamjson.py" "$A/transcript.jsonl" > "$A/usage.json" 2>/dev/null || echo '{}' > "$A/usage.json"
           fi
-          # Artifacts of public repositories are downloadable: refuse anything credential-like.
+          RC="$(cat "$A/claude-exit-code" 2>/dev/null || echo null)"
+          jq --argjson rc "${RC:-null}" '. + {claude_exit_code: $rc}' "$A/usage.json" > "$A/u.tmp" && mv "$A/u.tmp" "$A/usage.json"
+
+          # 2) Session notes are read from the working tree, then excluded from git.
+          if [ -f "$OUT/summary.json" ] && jq -e 'type=="object"' "$OUT/summary.json" >/dev/null 2>&1; then
+            jq '{outcome, commit_title, commit_body, notes} | with_entries(.value |= (tostring | .[0:4000]))' \
+              "$OUT/summary.json" > "$A/summary.json"
+          fi
+
+          # 3) Patch of legitimate source changes only. Neutralise anything the session may have
+          #    planted in git configuration or hooks, and keep the notes directory ignored through
+          #    .git/info/exclude. It is never named in a pathspec: naming an ignored path makes
+          #    `git add` fail ("paths are ignored"), which is what broke the first run.
+          cp "$A/git-config.orig" .git/config || fail git_config "could not restore .git/config"
+          grep -qxF "$OUT/" .git/info/exclude 2>/dev/null || echo "$OUT/" >> .git/info/exclude
+          G=(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c core.pager=cat
+             -c advice.addIgnoredFile=false)
+          "${G[@]}" add -A || fail git_add "git add failed"
+          if "${G[@]}" diff --cached --name-only | grep -qE "^${OUT}(/|$)"; then
+            fail exclusion "session notes ($OUT) would have entered the patch"
+          fi
+          "${G[@]}" diff --cached --binary --no-ext-diff --no-textconv > "$A/patch.diff" || fail git_diff "git diff failed"
+
+          # 4) Artifacts of public repositories are downloadable: refuse anything credential-like.
           if grep -Eq 'sk-ant-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_|PRIVATE KEY-----|AGE-SECRET-KEY' \
                "$A/patch.diff" "$A/summary.json"; then
             echo "credential-like content found; discarding patch"
             : > "$A/patch.diff"; echo '{"outcome":"blocked","notes":"secret scan"}' > "$A/summary.json"
           fi
-          if [ -s "$A/patch.diff" ]; then echo "has_patch=true" >> "$GITHUB_OUTPUT"; else echo "has_patch=false" >> "$GITHUB_OUTPUT"; fi
+          if [ -s "$A/patch.diff" ]; then
+            echo "has_patch=true" >> "$GITHUB_OUTPUT"
+            echo "patch: $("${G[@]}" diff --cached --name-only | wc -l | tr -d ' ') file(s)"
+          else
+            echo "has_patch=false" >> "$GITHUB_OUTPUT"
+            echo "no source changes to publish"
+          fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: autodev-agent-output
           retention-days: 3
-          if-no-files-found: error
+          if-no-files-found: warn
           path: |
             ${{ runner.temp }}/autodev/patch.diff
             ${{ runner.temp }}/autodev/summary.json
