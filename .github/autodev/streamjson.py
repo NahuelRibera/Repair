@@ -21,6 +21,7 @@ def summarize(lines: Iterable[str]) -> dict:
         "num_turns": None,
         "duration_ms": None,
         "rate_limit": None,
+        "rate_limits": [],
         "permission_denials": 0,
         "api_error": None,
     }
@@ -45,6 +46,11 @@ def summarize(lines: Iterable[str]) -> dict:
                 ),
                 "utilization": info.get("utilization"),
             }
+            # Latest event per window type, so the coordinator can tell 5-hour from weekly usage.
+            # Only these scalar fields are kept; nothing else from the event is reported.
+            kind = info.get("rateLimitType")
+            entry = dict(report["rate_limit"], type=kind if isinstance(kind, str) and len(kind) <= 40 else None)
+            report["rate_limits"] = [r for r in report["rate_limits"] if r.get("type") != entry["type"]] + [entry]
         elif kind == "result":
             report["result_subtype"] = ev.get("subtype")
             report["is_error"] = ev.get("is_error")
