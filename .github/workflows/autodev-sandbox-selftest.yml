@@ -1,0 +1,45 @@
+# Sandbox self-test for autodev-agent.yml. Installed at .github/workflows/autodev-sandbox-selftest.yml.
+#
+# Replays the agent job on a real runner, with the same setup, sandbox packages, locked settings
+# and "Run Claude Code" step, but with a scripted local model instead of claude.ai: no secret, no
+# Claude usage. Probes run inside the sandbox and prove that legitimate commands work (git reads,
+# the fast tests) while writes to .git, .github and the home directory, tokens and general network
+# stay blocked. See .github/autodev/sandbox_selftest.py.
+#
+# The `uses:` steps mirror the agent job's (same pins); everything else is read from autodev-agent.yml.
+
+name: autodev-sandbox-selftest
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/autodev-agent.yml"
+      - ".github/workflows/autodev-sandbox-selftest.yml"
+      - ".github/autodev/**"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: autodev-sandbox-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with: { distribution: temurin, java-version: "21" }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "22", package-manager-cache: false }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.12" }
+      - name: Replay the agent job with a scripted model
+        run: |
+          python -m pip install -q pyyaml==6.0.3
+          python .github/autodev/sandbox_selftest.py

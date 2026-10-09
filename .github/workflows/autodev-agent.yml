@@ -79,7 +79,10 @@ jobs:
         with: { python-version: "3.12" }
       - name: Pre-fetch dependencies (from the protected main branch, before Claude runs)
         run: |
-          (cd apps/api && ./mvnw -q -B dependency:go-offline)
+          # go-offline misses annotation processors and the Surefire provider, and Maven ignores the
+          # sandbox's HTTPS_PROXY: compile and run zero tests so the fast tests work offline.
+          (cd apps/api && ./mvnw -q -B dependency:go-offline \
+             && ./mvnw -q -B test -Dtest='*Test#autodevPrefetchNoSuchMethod' -Dsurefire.failIfNoSpecifiedTests=false)
           (cd apps/web && npm ci --no-audit --no-fund)
           python -m pip install -q -e "pipelines[dev]"
       # ------------------------------------------------
