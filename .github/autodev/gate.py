@@ -56,6 +56,8 @@ SECRET_PATTERNS = [
     re.compile(r"xox[baprs]-[A-Za-z0-9\-]{10,}"),
     re.compile(r"https://discord(?:app)?\.com/api/webhooks/\d+/"),
 ]
+# Private coordinator material and the session briefing must never be committed to a product repository.
+PRIVATE_CONTENT = re.compile(r"autodev-private|AUTODEV-BRIEF", re.IGNORECASE)
 MAX_CHANGED_LINES = 1500
 MAX_FILES = 40
 MAX_DELETED_LINES_HIGH_RISK = 300
@@ -121,36 +123,38 @@ def evaluate(diff_text: str, extra_secrets: list[str] | None = None) -> Verdict:
     medium: list[str] = []
 
     if not files:
-        return Verdict("reject", "low", ["diff vacío: no hay nada que publicar"], 0, 0, 0)
+        return Verdict("reject", "low", ["empty diff: nothing to publish"], 0, 0, 0)
 
     for f in files:
         if _match(f.path, FORBIDDEN_PATHS) or f.path.startswith(".github/workflows/"):
-            reject.append(f"ruta prohibida: {f.path}")
+            reject.append(f"forbidden path: {f.path}")
         if _match(f.path, APPROVAL_PATHS):
-            approval.append(f"ruta sensible: {f.path}")
+            approval.append(f"sensitive path: {f.path}")
         if _match(f.path, DEPENDENCY_FILES):
-            medium.append(f"cambio de dependencias: {f.path}")
+            medium.append(f"dependency change: {f.path}")
         if f.binary and f.path.split(".")[-1].lower() not in ("png", "jpg", "jpeg", "webp", "avif", "svg", "ico"):
-            approval.append(f"binario no esperado: {f.path}")
+            approval.append(f"unexpected binary: {f.path}")
         if f.deleted_file:
-            approval.append(f"fichero eliminado: {f.path}")
+            approval.append(f"deleted file: {f.path}")
         if _match(f.path, MIGRATION_PATHS):
             if any(DESTRUCTIVE_SQL.search(line) for line in f.added):
-                approval.append(f"migración destructiva: {f.path}")
+                approval.append(f"destructive migration: {f.path}")
             else:
-                medium.append(f"migración aditiva: {f.path}")
+                medium.append(f"additive migration: {f.path}")
+        if any(PRIVATE_CONTENT.search(line) for line in f.added):
+            reject.append(f"private coordinator content in {f.path}")
         for line in f.added:
             if any(p.search(line) for p in SECRET_PATTERNS):
-                reject.append(f"posible secreto en {f.path}")
+                reject.append(f"possible secret in {f.path}")
                 break
             if extra_secrets and any(s and s in line for s in extra_secrets):
-                reject.append(f"credencial del entorno filtrada en {f.path}")
+                reject.append(f"environment credential leaked in {f.path}")
                 break
 
     if len(files) > MAX_FILES or added + removed > MAX_CHANGED_LINES:
-        reject.append(f"cambio demasiado grande ({len(files)} ficheros, {added + removed} líneas)")
+        reject.append(f"change too large ({len(files)} files, {added + removed} lines)")
     if removed > MAX_DELETED_LINES_HIGH_RISK:
-        approval.append(f"borrado masivo ({removed} líneas)")
+        approval.append(f"mass deletion ({removed} lines)")
 
     if reject:
         return Verdict("reject", "high", reject + approval, len(files), added, removed)
