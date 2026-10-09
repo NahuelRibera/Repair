@@ -336,9 +336,12 @@ pytest
 Run from `apps/web`.
 
 ```bash
-npx tsc --noEmit
+npm run lint
+npm run typecheck
 npm run build
 ```
+
+`npm run typecheck` runs `next typegen` first, so the route types that Next.js generates (such as `LayoutProps`) exist even on a fresh checkout without a prior build.
 
 ### End to end
 
