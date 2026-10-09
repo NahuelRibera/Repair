@@ -103,14 +103,29 @@ jobs:
           cp .git/config "$RUNNER_TEMP/autodev/git-config.orig"
           echo ".autodev-out/" >> .git/info/exclude
 
+      - name: Move the git directory out of the working tree
+        # Claude Code's sandbox also protects paths inside .git that do not exist yet (.git/config.lock,
+        # .git/commondir, ...). Under a read-only .git, bubblewrap cannot create their mount points and
+        # every command fails ("Can't create file at .git/config.lock: Read-only file system", run
+        # 37920979602); otherwise Claude Code plants placeholders in .git. Behind a gitfile none of
+        # those paths can exist. The git directory stays read-only to the sandbox (denyWrite below) and
+        # the collect step moves it back.
+        run: |
+          set -euo pipefail
+          GITDIR="$(dirname "$GITHUB_WORKSPACE")/autodev-gitdir"
+          mv .git "$GITDIR"
+          printf 'gitdir: %s\n' "$GITDIR" > .git
+          git rev-parse --verify -q HEAD >/dev/null
+
       - name: Write locked settings
         run: |
-          jq -n --arg git "$GITHUB_WORKSPACE/.git" --arg gh "$GITHUB_WORKSPACE/.github" '{
+          jq -n --arg git "$GITHUB_WORKSPACE/.git" --arg gitdir "$(dirname "$GITHUB_WORKSPACE")/autodev-gitdir" \
+                --arg gh "$GITHUB_WORKSPACE/.github" '{
             sandbox: {
               enabled: true,
               failIfUnavailable: true,
               allowUnsandboxedCommands: false,
-              filesystem: { denyWrite: [$git, $gh] },
+              filesystem: { denyWrite: [$git, $gitdir, $gh] },
               network: { allowedDomains: [
                 "repo.maven.apache.org", "repo1.maven.org",
                 "registry.npmjs.org", "pypi.org", "files.pythonhosted.org",
@@ -126,7 +141,7 @@ jobs:
               deny: [
                 "WebFetch", "WebSearch",
                 "Read(/proc/**)", "Read(~/.claude/**)", "Read(//home/runner/work/_temp/**)",
-                "Edit(.github/**)", "Write(.github/**)", "Edit(.git/**)", "Write(.git/**)",
+                "Edit(.github/**)", "Write(.github/**)", "Edit(.git/**)", "Write(.git/**)", "Edit(/\($gitdir)/**)",
                 "Bash(git push:*)", "Bash(git remote:*)", "Bash(git config:*)", "Bash(git commit:*)",
                 "Bash(curl:*)", "Bash(wget:*)", "Bash(sudo:*)", "Bash(docker:*)" ]
             }
@@ -203,10 +218,24 @@ jobs:
           #    planted in git configuration or hooks, and keep the notes directory ignored through
           #    .git/info/exclude. It is never named in a pathspec: naming an ignored path makes
           #    `git add` fail ("paths are ignored"), which is what broke the first run.
+          GITDIR="$(dirname "${GITHUB_WORKSPACE:-$PWD}")/autodev-gitdir"
+          if [ -d "$GITDIR" ]; then
+            { rm -f .git && mv "$GITDIR" .git; } || fail git_dir "could not move the git directory back"
+          fi
           cp "$A/git-config.orig" .git/config || fail git_config "could not restore .git/config"
           grep -qxF "$OUT/" .git/info/exclude 2>/dev/null || echo "$OUT/" >> .git/info/exclude
           G=(git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c diff.external= -c core.pager=cat
              -c advice.addIgnoredFile=false)
+          # Claude Code's scrub mode creates these as empty stubs (mount points) and would hide them
+          # through .git/info/exclude, which it cannot reach behind the gitfile. They are read-only
+          # to the sandbox, so an untracked empty one is always a stub and never the session's work.
+          for f in bunfig.toml package.json .npmrc .yarnrc .yarnrc.yml .gitmodules package-lock.json yarn.lock \
+                   pnpm-lock.yaml .env .env.local .env.development .env.development.local .env.test .env.test.local \
+                   .env.production .env.production.local; do
+            if [ -f "$f" ] && [ ! -s "$f" ] && ! "${G[@]}" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then
+              rm -f -- "$f"
+            fi
+          done
           "${G[@]}" add -A || fail git_add "git add failed"
           if "${G[@]}" diff --cached --name-only | grep -qE "^${OUT}(/|$)"; then
             fail exclusion "session notes ($OUT) would have entered the patch"
