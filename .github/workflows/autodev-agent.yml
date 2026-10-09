@@ -263,7 +263,7 @@ jobs:
         if: always()
         with:
           name: autodev-agent-output
-          retention-days: 3
+          retention-days: 1   # consumed by verify and publish in this same run
           if-no-files-found: warn
           path: |
             ${{ runner.temp }}/autodev/patch.diff
@@ -413,10 +413,12 @@ jobs:
              '$usage[0] + {outcome:$outcome, decision:$decision, pr_number:($pr|tonumber? // null),
               error:(if ($outcome=="pr_opened" or $outcome=="no_change") then null else $outcome end)}' \
              > "$RUNNER_TEMP/report/report.json"
-          cat "$RUNNER_TEMP/report/report.json"
+          # The report holds plan usage figures: it is read by the coordinator from the artifact and is never
+          # printed, because logs of public repositories are world-readable.
+          echo "outcome: $OUTCOME"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: autodev-report
-          retention-days: 7
+          retention-days: 1   # the coordinator reads it within minutes; if it expires, the session PR is found by branch
           path: ${{ runner.temp }}/report/report.json
