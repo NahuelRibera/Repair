@@ -1,0 +1,182 @@
+# Autodev planning workflow. Installed at .github/workflows/autodev-plan.yml in each target repository
+# through a reviewed pull request; identical in every repository (no project block). Triggered ONLY by
+# the coordinator (workflow_dispatch). Separate from development: it never builds, tests, commits,
+# pushes or opens pull requests, and it has no publish job.
+#
+# What it does: open an age-sealed planning context, let Claude read it and the repository (read-only
+# tools, as a separate OS user with a read-only copy of the code and an egress allowlist), and seal the
+# answer to the coordinator's pinned public key. See docs/16 §11 in the coordinator repository.
+#
+# Trust boundaries:
+#   runner user        this workflow's own steps (code from main); holds the secrets, one step each
+#   autodev-planner    the Claude process: no sudo, cannot read the runner's home (checkout, temp files,
+#                      sealed binding), sees only /srv/autodev-plan (context + read-only code copy),
+#                      network limited by iptables to the Messages API, no DNS
+#   repository content data for the planner, never configuration: the planner runs outside the checkout,
+#                      loads no project settings, hooks or CLAUDE.md, and its tools cannot write
+#
+# Secrets (environment autodev-agent, main only), each referenced by exactly one step:
+#   AUTODEV_PLAN_IDENTITY     this repository's planning identity (age, K_ctx private)  -> "Open the sealed context"
+#   CLAUDE_CODE_OAUTH_TOKEN   the existing Claude Pro token                              -> "Run the planner"
+# Public inputs: a correlation id and ciphertext. Nothing readable is ever printed or uploaded.
+# Actions are pinned to full commit SHAs (tag in the trailing comment), the same pins as autodev-agent.yml.
+
+name: autodev-plan
+run-name: "autodev plan ${{ inputs.correlation_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      correlation_id: { required: true, type: string }
+      sealed_context: { required: true, type: string }
+
+permissions: {}
+
+concurrency:
+  group: autodev-plan
+  cancel-in-progress: false
+
+env:
+  CLAUDE_CODE_VERSION: "2.1.294"   # pinned; the same version as autodev-agent.yml
+  # The coordinator's public key (K_out). Reports are sealed to it and nothing else; changing it needs
+  # a reviewed pull request. "UNSET" until the owner pins the real recipient (phase 3): no report can
+  # be sealed, so every run fails closed.
+  AUTODEV_COORDINATOR_RECIPIENT: "UNSET"
+  AUTODEV_PLAN_EGRESS: "api.anthropic.com:443"   # the planner user's only network destination
+  AUTODEV_PLAN_ROOT: /srv/autodev-plan
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    environment: autodev-agent
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Validate inputs
+        env:
+          CID: ${{ inputs.correlation_id }}
+          SEALED: ${{ inputs.sealed_context }}
+        run: |
+          set -euo pipefail
+          [[ "$CID" =~ ^ad-[0-9a-f]{12}$ ]] || { echo "bad correlation id"; exit 1; }
+          [ "${#SEALED}" -le 60000 ] && [[ "$SEALED" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] || { echo "bad sealed context"; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false     # no git token on disk
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "22", package-manager-cache: false }   # no caches in this job
+
+      - name: Install age, Claude Code and the planner user
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq age iptables rsync >/dev/null
+          npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" >/dev/null
+          id autodev-planner >/dev/null 2>&1 || sudo useradd --system --create-home --home-dir /var/lib/autodev-planner \
+            --shell /usr/sbin/nologin autodev-planner
+          sudo chmod 0700 /var/lib/autodev-planner
+          ! sudo -n -l -U autodev-planner 2>/dev/null | grep -q "may run" || { echo "planner user has sudo"; exit 1; }
+
+      - name: Restrict the planner
+        run: |
+          set -euo pipefail
+          R="$AUTODEV_PLAN_ROOT"
+          # Filesystem: the planner sees a root-owned, read-only copy of the code (no .git) and an empty
+          # working directory; the runner's home (checkout, temp files, sealed binding) becomes private.
+          sudo rm -rf "$R"
+          sudo install -d -m 0755 -o root -g root "$R" "$R/work" "$R/repo"
+          # --safe-links drops absolute links and links leaving the tree: inside the view they would pass the
+          # path check while reading elsewhere (/proc/self/environ holds the planner's token). Verified below.
+          sudo rsync -a --safe-links --exclude .git "$GITHUB_WORKSPACE/" "$R/repo/"
+          sudo find "$R/repo" -type l -print0 | while IFS= read -r -d '' link; do
+            case "$(sudo readlink -m "$link")" in "$R/repo/"*) ;; *) echo "a link leaves the code copy"; exit 1 ;; esac
+          done
+          sudo chown -R root:root "$R/repo" && sudo chmod -R u=rwX,go=rX "$R/repo"
+          chmod 0700 "$HOME"
+          # Claude Code settings: read-only tools inside the view, no hooks, no prompts. These rules are a
+          # second layer only: the self-test shows Read outside the allowed path is not reliably refused by
+          # them, so the OS boundary above (private home, read-only copy) is what actually confines reads.
+          jq -n --arg root "$R" '{
+            permissions: { allow: ["Read(/\($root)/**)"],
+                           deny: ["Bash", "Edit", "Write", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent",
+                                  "Read(//home/**)", "Read(//root/**)", "Read(//proc/**)", "Read(//sys/**)",
+                                  "Read(//tmp/**)", "Read(//var/**)", "Read(//run/**)", "Read(//etc/**)",
+                                  "Read(//opt/**)", "Read(//dev/**)"],
+                           defaultMode: "dontAsk" },
+            disableAllHooks: true, enableAllProjectMcpServers: false }' | sudo tee "$R/settings.json" >/dev/null
+          sudo chmod 0644 "$R/settings.json"
+          # Network: only the planner user is limited. Each allowed host is resolved now and pinned in
+          # /etc/hosts, so the planner needs no DNS (DNS is a covert channel); everything else is rejected,
+          # IPv6 included.
+          U="$(id -u autodev-planner)"
+          sudo iptables -N AUTODEV_PLANNER 2>/dev/null || sudo iptables -F AUTODEV_PLANNER
+          for dest in $AUTODEV_PLAN_EGRESS; do
+            host="${dest%:*}"; port="${dest##*:}"
+            [[ "$port" =~ ^[0-9]+$ ]] || { echo "bad egress entry"; exit 1; }
+            if [[ "$host" =~ ^[0-9.]+$ ]]; then ips="$host"; else
+              ips="$(getent ahostsv4 "$host" | awk '{print $1}' | sort -u)"
+              [ -n "$ips" ] || { echo "cannot resolve an allowed host"; exit 1; }
+              echo "$(echo "$ips" | head -1) $host" | sudo tee -a /etc/hosts >/dev/null
+            fi
+            for ip in $ips; do sudo iptables -A AUTODEV_PLANNER -p tcp -d "$ip" --dport "$port" -j ACCEPT; done
+          done
+          sudo iptables -A AUTODEV_PLANNER -j REJECT
+          sudo iptables -I OUTPUT 1 -m owner --uid-owner "$U" -j AUTODEV_PLANNER
+          sudo ip6tables -I OUTPUT 1 -m owner --uid-owner "$U" -j REJECT
+          echo "planner restricted: read-only view, $(echo $AUTODEV_PLAN_EGRESS | wc -w) allowed destination(s)"
+
+      - name: Open the sealed context
+        env:
+          AUTODEV_PLAN_IDENTITY: ${{ secrets.AUTODEV_PLAN_IDENTITY }}
+          SEALED_CONTEXT: ${{ inputs.sealed_context }}
+          CORRELATION_ID: ${{ inputs.correlation_id }}
+        run: python3 "$GITHUB_WORKSPACE/.github/autodev/plan_runner.py" open
+
+      - name: Run the planner
+        timeout-minutes: 50
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          H="$GITHUB_WORKSPACE/.github/autodev/plan_runner.py"
+          P="$RUNNER_TEMP/autodev-plan"
+          [ "$(python3 "$H" state)" = ok ] || { echo "planner not started: the context was not opened"; exit 1; }
+          MODEL="$(python3 "$H" param model)"; TURNS="$(python3 "$H" param max_turns)"
+          BUDGET="$(python3 "$H" param max_budget_usd)"; MINUTES="$(python3 "$H" param timeout_minutes)"
+          PROMPT="$(python3 "$H" prompt)"
+          cd "$AUTODEV_PLAN_ROOT/work"
+          # The planner user gets the token and (self-test only) the mock API URL; nothing else crosses.
+          timeout --kill-after=30s "${MINUTES}m" \
+            sudo -n -u autodev-planner --preserve-env=CLAUDE_CODE_OAUTH_TOKEN,ANTHROPIC_BASE_URL -- \
+            /usr/bin/env HOME=/var/lib/autodev-planner PATH="$PATH" \
+              CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 \
+            claude -p "$PROMPT" --model "$MODEL" --max-turns "$TURNS" --max-budget-usd "$BUDGET" \
+              --tools Read,Grep,Glob --allowedTools Read,Grep,Glob \
+              --disallowedTools Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task \
+              --permission-mode dontAsk --setting-sources user --settings "$AUTODEV_PLAN_ROOT/settings.json" \
+              --strict-mcp-config --disable-slash-commands --no-session-persistence \
+              --add-dir "$AUTODEV_PLAN_ROOT/repo" --output-format stream-json --verbose \
+            > "$P/transcript.jsonl" 2> "$P/stderr.log"
+          rc=$?
+          echo "$rc" > "$P/claude-exit-code"
+          echo "planner exit code: $rc"
+          # The transcript is never printed: public repository logs are world-readable.
+
+      - name: Collect and seal the report
+        if: always()
+        run: python3 "$GITHUB_WORKSPACE/.github/autodev/plan_runner.py" collect
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: autodev-plan
+          path: ${{ runner.temp }}/autodev-plan-out/plan.age
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: warn
+
+      - name: Remove planner data
+        if: always()
+        run: |
+          sudo rm -rf "$AUTODEV_PLAN_ROOT" "$RUNNER_TEMP/autodev-plan" /var/lib/autodev-planner || true
