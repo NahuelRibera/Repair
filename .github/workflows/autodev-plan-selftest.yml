@@ -1,0 +1,41 @@
+# Planner self-test for autodev-plan.yml. Installed at .github/workflows/autodev-plan-selftest.yml.
+#
+# Replays the planning job on a real runner with synthetic age keys, a synthetic sealed context and a
+# scripted local model instead of claude.ai: no secret, no environment, no Claude usage. Proves the
+# sealing, the run binding, fail-closed behaviour, that canaries never reach the model or the log, and the
+# planner user's filesystem and network boundary. See .github/autodev/plan_selftest.py.
+#
+# The `uses:` steps mirror the planning job's (same pins); everything else is read from autodev-plan.yml.
+
+name: autodev-plan-selftest
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/autodev-plan.yml"
+      - ".github/workflows/autodev-plan-selftest.yml"
+      - ".github/autodev/plan_*.py"
+      - ".github/autodev/mock_*.py"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: autodev-plan-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  planner:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "22", package-manager-cache: false }
+      - name: Replay the planning job with synthetic keys and a scripted model
+        run: |
+          sudo apt-get install -y -qq python3-yaml >/dev/null
+          python3 .github/autodev/plan_selftest.py
