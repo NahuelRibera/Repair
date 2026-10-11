@@ -70,6 +70,11 @@ class FileChange:
     removed: list[str] = field(default_factory=list)
     deleted_file: bool = False
     binary: bool = False
+    mode: str = ""   # "120000" symlink, "160000" submodule (gitlink)
+    # Every path this change touches: the old side of the header and rename/copy sources too. A rename
+    # removes its source, so `.github/autodev/gate.py -> docs/gate.py` must be judged as `.github/autodev/`.
+    paths: list[str] = field(default_factory=list)
+    unparsed: bool = False
 
 
 @dataclass
@@ -86,18 +91,47 @@ class Verdict:
         return {"publish": 0, "approval": 3, "reject": 1}[self.decision]
 
 
+_QUOTED = r'"(?:[^"\\]|\\.)*"'
+_HEADER = re.compile(rf"diff --git (?P<a>{_QUOTED}|a/.+?) (?P<b>{_QUOTED}|b/.+)$")
+_EXTENDED = re.compile(r"(rename|copy) (from|to) (.+)$")
+
+
+def _unquote(name: str) -> str:
+    """Git C-quotes names with special or non-ASCII bytes: "b/.github/autodev/\\303\\251.sh"."""
+    if len(name) >= 2 and name[0] == name[-1] == '"':
+        raw = name[1:-1].encode("ascii", "backslashreplace").decode("unicode_escape")
+        return raw.encode("latin-1", "replace").decode("utf-8", "replace")
+    return name
+
+
 def parse_diff(text: str) -> list[FileChange]:
     files: list[FileChange] = []
     cur: FileChange | None = None
     for line in text.splitlines():
         if line.startswith("diff --git "):
-            m = re.match(r"diff --git a/(.+?) b/(.+)$", line)
-            cur = FileChange(path=m.group(2) if m else line)
+            m = _HEADER.match(line)
+            rest = line[len("diff --git "):]
+            half = (len(rest) - 1) // 2
+            if rest[half:half + 1] == " " and rest[:2] == "a/" and rest[half + 1:half + 3] == "b/" \
+                    and rest[2:half] == rest[half + 3:]:
+                # `a/P b/P`: the only exact split when P itself contains " b/" (the lazy regex cuts there).
+                cur = FileChange(path=rest[2:half], paths=[rest[2:half]])
+            elif m is None:   # unknown header shape: judged as unparseable, never as a harmless path
+                cur = FileChange(path=line, unparsed=True)
+            else:
+                a, b = _unquote(m.group("a"))[2:], _unquote(m.group("b"))[2:]
+                cur = FileChange(path=b, paths=list(dict.fromkeys([b, a])))
             files.append(cur)
         elif cur is None:
             continue
+        elif (ext := _EXTENDED.match(line)) is not None:
+            name = _unquote(ext.group(3))
+            if name not in cur.paths:
+                cur.paths.append(name)
         elif line.startswith("deleted file mode"):
             cur.deleted_file = True
+        elif line.startswith(("new file mode ", "new mode ")):
+            cur.mode = line.rsplit(" ", 1)[-1]
         elif line.startswith("Binary files") or line.startswith("GIT binary patch"):
             cur.binary = True
         elif line.startswith("+++") or line.startswith("---"):
@@ -126,14 +160,22 @@ def evaluate(diff_text: str, extra_secrets: list[str] | None = None) -> Verdict:
         return Verdict("reject", "low", ["empty diff: nothing to publish"], 0, 0, 0)
 
     for f in files:
-        if _match(f.path, FORBIDDEN_PATHS) or f.path.startswith(".github/workflows/"):
-            reject.append(f"forbidden path: {f.path}")
-        if _match(f.path, APPROVAL_PATHS):
-            approval.append(f"sensitive path: {f.path}")
-        if _match(f.path, DEPENDENCY_FILES):
-            medium.append(f"dependency change: {f.path}")
+        if f.unparsed:
+            reject.append(f"unparseable diff header: {f.path[:120]}")
+            continue
+        for path in f.paths:
+            if _match(path, FORBIDDEN_PATHS) or path.startswith(".github/workflows/"):
+                reject.append(f"forbidden path: {path}")
+            if _match(path, APPROVAL_PATHS):
+                approval.append(f"sensitive path: {path}")
+            if _match(path, DEPENDENCY_FILES):
+                medium.append(f"dependency change: {path}")
         if f.binary and f.path.split(".")[-1].lower() not in ("png", "jpg", "jpeg", "webp", "avif", "svg", "ico"):
             approval.append(f"unexpected binary: {f.path}")
+        if f.mode == "120000":
+            approval.append(f"symlink: {f.path}")
+        elif f.mode == "160000":
+            approval.append(f"submodule: {f.path}")
         if f.deleted_file:
             approval.append(f"deleted file: {f.path}")
         if _match(f.path, MIGRATION_PATHS):
