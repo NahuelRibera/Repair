@@ -175,6 +175,8 @@ The rest of the file is organised into consistent Markdown sections for specific
 
 The content is curated, model specific technical and maintenance information.
 
+The structure of these files (front matter, required sections, units, the convention for unknown values) is defined in [docs/knowledge-schema.md](docs/knowledge-schema.md).
+
 ### Ingestion pipeline (`pipelines`)
 
 The ingestion pipeline is a standalone Python package under `pipelines/ingest` and `pipelines/embeddings`.
