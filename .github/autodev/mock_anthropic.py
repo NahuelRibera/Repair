@@ -1,7 +1,7 @@
 """Scripted stand-in for the Messages API, used to drive the real Claude Code CLI offline.
 
 Each request that offers the Bash tool is answered with the next command from the script as a
-`tool_use`; once the script is exhausted the model ends its turn. Every tool result Claude Code
+`tool_use` (a string is a Bash command; {"tool": ..., "input": ...} calls any other tool, such as Write); once the script is exhausted the model ends its turn. Every tool result Claude Code
 sends back is appended to the results file, so a test can see exactly what each sandboxed command
 returned. No Claude quota is consumed and no network beyond localhost is needed.
 
@@ -90,8 +90,10 @@ class Handler(BaseHTTPRequestHandler):
                                          "output": _text(last.get("content"))}) + "\n")
             n = len(done)
             if n < len(commands):
-                blocks = [{"type": "tool_use", "id": f"toolu_{n:03d}", "name": "Bash",
-                           "input": {"command": commands[n], "description": f"probe {n}"}}]
+                cmd = commands[n]  # a Bash command, or {"tool": ..., "input": ...} for any other tool
+                name, args = ((cmd["tool"], cmd["input"]) if isinstance(cmd, dict)
+                              else ("Bash", {"command": cmd, "description": f"probe {n}"}))
+                blocks = [{"type": "tool_use", "id": f"toolu_{n:03d}", "name": name, "input": args}]
                 events = _message(blocks, "tool_use")
             else:
                 events = _message([{"type": "text", "text": "done"}], "end_turn")
