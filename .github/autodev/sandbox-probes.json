@@ -7,7 +7,10 @@
   {
     "name": "workspace-write",
     "why": "the working tree is writable",
-    "script": "echo allowed > autodev-probe-allowed.txt || fail \"write\"\ngrep -qx allowed autodev-probe-allowed.txt || fail \"read back\""
+    "script": "echo allowed > autodev-probe-allowed.txt || fail \"write\"\ngrep -qx allowed autodev-probe-allowed.txt || fail \"read back\"",
+    "patch": [
+      "autodev-probe-allowed.txt"
+    ]
   },
   {
     "name": "maven-test",
@@ -23,6 +26,211 @@
     "name": "github-writes-blocked",
     "why": ".github cannot be changed",
     "script": "blocked \"create a file in .github\" touch .github/autodev-probe-planted\nblocked \"edit a workflow\" sh -c 'echo \"#\" >> .github/workflows/ci.yml'\nblocked \"edit a helper\" sh -c 'echo \"#\" >> .github/autodev/gate.py'\nblocked \"remove .github\" rm -rf .github"
+  },
+  {
+    "name": "file-tools-write-ci-protected-paths",
+    "why": "Claude's Write and Edit tools can change scripts/, which Claude Code keeps read-only to shell commands in CI",
+    "calls": [
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/scripts/autodev-probe-tool.txt",
+          "content": "allowed\n"
+        },
+        "expect": "allowed"
+      }
+    ],
+    "patch": [
+      "scripts/autodev-probe-tool.txt"
+    ]
+  },
+  {
+    "name": "file-tools-writes-blocked",
+    "why": "Claude's own file tools cannot change .github, the git directory, Claude Code settings or runner files, directly, through '..' or through symlinks",
+    "calls": [
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.github/autodev-probe-planted",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.autodev-probe/../.github/autodev-probe-planted-traversal",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{gitdir}/hooks/autodev-probe-planted",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{gitdir}/autodev-probe-planted",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Read",
+        "input": {
+          "file_path": "{ws}/.git"
+        },
+        "expect": "allowed"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.git",
+          "content": "gitdir: /tmp/autodev-probe-planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.claude/settings.json",
+          "content": "{\"hooks\": {\"PreToolUse\": [{\"matcher\": \"*\", \"hooks\": [{\"type\": \"command\", \"command\": \"touch {ws}/autodev-probe-planted-by-hook\"}]}]}}"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.claude/settings.local.json",
+          "content": "{\"hooks\": {\"PreToolUse\": [{\"matcher\": \"*\", \"hooks\": [{\"type\": \"command\", \"command\": \"touch {ws}/autodev-probe-planted-by-hook\"}]}]}}"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.mcp.json",
+          "content": "{\"mcpServers\": {\"p\": {\"command\": \"touch\", \"args\": [\"{ws}/autodev-probe-planted-by-mcp\"]}}}"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{temp}/autodev/streamjson.py",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Bash",
+        "input": {
+          "command": "ln -sfn ../.github/workflows/autodev-agent.yml .autodev-probe/link-github && ln -sfn {gitdir}/hooks/autodev-probe-planted-link .autodev-probe/link-gitdir && ln -sfn {temp}/autodev/streamjson.py .autodev-probe/link-temp",
+          "description": "probe setup"
+        },
+        "expect": "allowed"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.autodev-probe/link-github",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Edit",
+        "input": {
+          "file_path": "{ws}/.autodev-probe/link-github",
+          "old_string": "name:",
+          "new_string": "name: # planted",
+          "replace_all": true
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.autodev-probe/link-gitdir",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.autodev-probe/link-temp",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Bash",
+        "input": {
+          "command": "echo the project settings written above must not have installed a hook",
+          "description": "probe setup"
+        },
+        "expect": "allowed"
+      }
+    ]
+  },
+  {
+    "name": "file-tools-rules-hold-after-cd",
+    "why": "the file tools' path rules still hold after the session changes directory",
+    "calls": [
+      {
+        "tool": "Bash",
+        "input": {
+          "command": "cd scripts && pwd",
+          "description": "probe setup"
+        },
+        "expect": "allowed"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/.github/autodev-probe-planted-after-cd",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{ws}/scripts/../.github/autodev-probe-planted-after-cd-traversal",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Write",
+        "input": {
+          "file_path": "{gitdir}/autodev-probe-planted-after-cd",
+          "content": "planted\n"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Read",
+        "input": {
+          "file_path": "/proc/self/environ"
+        },
+        "expect": "denied"
+      },
+      {
+        "tool": "Bash",
+        "input": {
+          "command": "cd {ws} && pwd",
+          "description": "probe setup"
+        },
+        "expect": "allowed"
+      }
+    ]
   },
   {
     "name": "home-writes-blocked",
