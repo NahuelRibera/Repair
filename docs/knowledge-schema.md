@@ -10,6 +10,43 @@ front matter or sections, invalid identifiers, a year range that disagrees with 
 duplicate headings, out-of-order required sections). `pipelines/tests/test_knowledge_schema.py`
 runs it over the whole corpus.
 
+## Running the validator
+
+```bash
+cd pipelines
+python -m knowledge.validate                    # whole corpus, text output
+python -m knowledge.validate --format json      # machine-readable
+python -m knowledge.validate path/to/file.md    # files or directories
+python -m knowledge.validate --baseline         # ignore errors recorded in the baseline
+python -m knowledge.validate --write-baseline   # rewrite knowledge/baseline.json
+```
+
+Each finding carries the file, the line (where one is known), a rule id and a severity. The exit
+code is 1 when at least one error remains (after applying `--baseline`, if given) and 0 otherwise;
+warnings never fail the run. The checks are deterministic (regex and structure) and never modify
+a knowledge file.
+
+| Rule | Severity | Reports |
+|---|---|---|
+| `parse-error` | error | unreadable file or invalid YAML front matter |
+| `fm-missing-key` / `fm-type` | error | missing or empty required key; wrong type for `aliases`, `last_verified`, `provenance` |
+| `fm-unknown-key` | warning | key not in the schema |
+| `id-invalid` | error | invalid manufacturer, model, market, variant or year value |
+| `year-range` | error | `year_from` greater than `year_to` |
+| `path-mismatch` | error | directory or file name disagrees with manufacturer, model or `year_from` |
+| `section-missing` / `section-duplicate` / `section-order` | error | required sections absent, repeated or out of order |
+| `unit-invalid` | error | non-canonical spelling of a schema unit after a number (`Nm`, `kpa`, `litres`, `ml`, ...) |
+| `unit-unknown` | warning | fact-index value with a unit the schema and the accepted extras (`bar`, `kg`, `V`, `Ah`, `rpm`, `years`, ...) do not list |
+| `entry-duplicate` / `entry-overlap` | error | two files for the same manufacturer, model, market and variant with identical or overlapping years |
+| `fact-index-duplicate` | error | the fact index lists one fact twice with different values |
+| `fact-index-conflict` | error | a `- Label: value` line or two-column table row elsewhere in the file has the same label as a fact-index row but a different quantity in the same unit |
+
+`pipelines/knowledge/baseline.json` records the errors tolerated today (currently none), keyed by
+file, rule and message so unrelated edits do not shift it.
+`pipelines/tests/test_knowledge_validate.py` fails when the corpus produces an error that is not in
+the baseline. Fix errors rather than adding them to the baseline; regenerate it only to remove
+entries, or when a new rule is introduced and the existing corpus cannot yet satisfy it.
+
 ## Layout
 
 `knowledge/motorcycles/<manufacturer-slug>/<model-slug>/<year_from>.md`. Slugs are produced by

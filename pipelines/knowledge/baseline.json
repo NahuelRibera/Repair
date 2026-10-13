@@ -1,0 +1,5 @@
+{
+  "schema_version": "1.0",
+  "description": "Known validation errors tolerated until fixed. Regenerate with `python -m knowledge.validate --write-baseline`; entries should only ever be removed.",
+  "errors": []
+}
