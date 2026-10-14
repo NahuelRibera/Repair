@@ -6,7 +6,9 @@ import dev.repair.api.auth.AuthenticatedUserContext;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -47,6 +49,39 @@ public class MaintenanceController {
     @ResponseStatus(HttpStatus.CREATED)
     public MaintenanceEventDto createMaintenance(@PathVariable long id, @Valid @RequestBody CreateMaintenanceEventRequest request) {
         requireOwned(id);
+        validate(request);
+        long eventId = maintenanceRepository.createEvent(
+                id, request.serviceType(), request.odometerKm(), request.performedAt(), request.notes(), "manual"
+        );
+        return maintenanceRepository.listForOwnedVehicle(currentUser.getUserId(), id).stream()
+                .filter(e -> e.id() == eventId)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("Maintenance event vanished immediately after creation"));
+    }
+
+    /** Full replacement of the editable fields, validated exactly like creation. */
+    @PatchMapping("/api/garage/vehicles/{id}/maintenance/{eventId}")
+    public MaintenanceEventDto updateMaintenance(
+            @PathVariable long id, @PathVariable long eventId, @Valid @RequestBody CreateMaintenanceEventRequest request
+    ) {
+        requireOwned(id);
+        validate(request);
+        return maintenanceRepository.updateOwnedEvent(
+                        currentUser.getUserId(), id, eventId, request.serviceType(), request.odometerKm(),
+                        request.performedAt(), request.notes())
+                .orElseThrow(() -> new NotFoundException("Maintenance event not found"));
+    }
+
+    @DeleteMapping("/api/garage/vehicles/{id}/maintenance/{eventId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMaintenance(@PathVariable long id, @PathVariable long eventId) {
+        requireOwned(id);
+        if (!maintenanceRepository.deleteOwnedEvent(currentUser.getUserId(), id, eventId)) {
+            throw new NotFoundException("Maintenance event not found");
+        }
+    }
+
+    private static void validate(CreateMaintenanceEventRequest request) {
         if (!ServiceType.isValid(request.serviceType())) {
             throw new BadRequestException("Unknown service type: " + request.serviceType());
         }
@@ -56,13 +91,6 @@ public class MaintenanceController {
         if (request.odometerKm() != null && (request.odometerKm() < 0 || request.odometerKm() > 500_000)) {
             throw new BadRequestException("Odometer reading is out of range");
         }
-        long eventId = maintenanceRepository.createEvent(
-                id, request.serviceType(), request.odometerKm(), request.performedAt(), request.notes(), "manual"
-        );
-        return maintenanceRepository.listForOwnedVehicle(currentUser.getUserId(), id).stream()
-                .filter(e -> e.id() == eventId)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Maintenance event vanished immediately after creation"));
     }
 
     @GetMapping("/api/garage/vehicles/{id}/dashboard")

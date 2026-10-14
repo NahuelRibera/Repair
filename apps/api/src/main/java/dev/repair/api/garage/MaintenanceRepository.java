@@ -41,6 +41,48 @@ public class MaintenanceRepository {
                 .single();
     }
 
+    /** Replaces the editable fields of one event, scoped by owner: the row
+     * is touched only when its vehicle belongs to userId and is not
+     * deleted. Empty when no such event exists for this user and vehicle. */
+    public Optional<MaintenanceEventDto> updateOwnedEvent(
+            long userId, long garageVehicleId, long eventId, String serviceType, Double odometerKm, LocalDate performedAt, String notes
+    ) {
+        return jdbcClient.sql(
+                        """
+                        UPDATE maintenance_events e
+                        SET service_type = :serviceType, odometer_km = :odometerKm, performed_at = :performedAt, notes = :notes
+                        FROM garage_vehicles g
+                        WHERE e.id = :eventId AND e.garage_vehicle_id = :garageVehicleId
+                          AND g.id = e.garage_vehicle_id AND g.user_id = :userId AND g.deleted_at IS NULL
+                        RETURNING e.id, e.garage_vehicle_id, e.service_type, e.odometer_km, e.performed_at,
+                                  e.notes, e.created_via, e.created_at
+                        """)
+                .param("serviceType", serviceType)
+                .param("odometerKm", odometerKm)
+                .param("performedAt", performedAt)
+                .param("notes", notes)
+                .param("eventId", eventId)
+                .param("garageVehicleId", garageVehicleId)
+                .param("userId", userId)
+                .query(MaintenanceRepository::map)
+                .optional();
+    }
+
+    /** Deletes one event, scoped by owner. Returns false when no such event exists for this user and vehicle. */
+    public boolean deleteOwnedEvent(long userId, long garageVehicleId, long eventId) {
+        return jdbcClient.sql(
+                        """
+                        DELETE FROM maintenance_events e
+                        USING garage_vehicles g
+                        WHERE e.id = :eventId AND e.garage_vehicle_id = :garageVehicleId
+                          AND g.id = e.garage_vehicle_id AND g.user_id = :userId AND g.deleted_at IS NULL
+                        """)
+                .param("eventId", eventId)
+                .param("garageVehicleId", garageVehicleId)
+                .param("userId", userId)
+                .update() > 0;
+    }
+
     /**
      * Used when the rider explicitly names the OLD value being corrected
      * — "the oil change at 20,000 km was at 19,000 km", "it wasn't

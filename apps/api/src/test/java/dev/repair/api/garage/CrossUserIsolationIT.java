@@ -3,7 +3,9 @@ package dev.repair.api.garage;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -82,6 +84,44 @@ class CrossUserIsolationIT {
                 .andExpect(status().isNotFound());
 
         assertThat(maintenanceRepository.listForOwnedVehicle(userIdOf(subA), vehicleA)).hasSize(1);
+    }
+
+    @Test
+    void otherUserGets404WhenEditingOrDeletingMaintenanceAndNothingChanges() throws Exception {
+        long eventId = maintenanceRepository.listForOwnedVehicle(userIdOf(subA), vehicleA).get(0).id();
+
+        mockMvc.perform(patch("/api/garage/vehicles/{id}/maintenance/{e}", vehicleA, eventId).with(asB()).with(csrf())
+                        .contentType("application/json").content(EVENT_BODY))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/garage/vehicles/{id}/maintenance/{e}", vehicleA, eventId).with(asB()).with(csrf()))
+                .andExpect(status().isNotFound());
+        // B's own vehicle id combined with A's event id must not reach A's row either.
+        mockMvc.perform(delete("/api/garage/vehicles/{id}/maintenance/{e}", vehicleB, eventId).with(asB()).with(csrf()))
+                .andExpect(status().isNotFound());
+
+        var events = maintenanceRepository.listForOwnedVehicle(userIdOf(subA), vehicleA);
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).odometerKm()).isEqualTo(5000.0);
+    }
+
+    @Test
+    void ownerEditsAndDeletesOwnEventAndDashboardFollows() throws Exception {
+        long eventId = maintenanceRepository.listForOwnedVehicle(userIdOf(subA), vehicleA).get(0).id();
+
+        mockMvc.perform(patch("/api/garage/vehicles/{id}/maintenance/{e}", vehicleA, eventId).with(asA()).with(csrf())
+                        .contentType("application/json").content(EVENT_BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.odometerKm").value(12000));
+        mockMvc.perform(patch("/api/garage/vehicles/{id}/maintenance/{e}", vehicleA, eventId).with(asA()).with(csrf())
+                        .contentType("application/json").content("{\"serviceType\":\"BOGUS\",\"odometerKm\":1}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(delete("/api/garage/vehicles/{id}/maintenance/{e}", vehicleA, eventId).with(asA()).with(csrf()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(delete("/api/garage/vehicles/{id}/maintenance/{e}", vehicleA, eventId).with(asA()).with(csrf()))
+                .andExpect(status().isNotFound());
+
+        assertThat(maintenanceRepository.listForOwnedVehicle(userIdOf(subA), vehicleA)).isEmpty();
+        assertThat(maintenanceRepository.latestEventByType(vehicleA)).isEmpty();
     }
 
     @Test
