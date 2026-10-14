@@ -33,7 +33,7 @@ The architecture is still manufacturer, model and year driven. Those are first c
 
 7. Distinguish confirmed maintenance from hypothetical, planned or uncertain statements so those messages do not accidentally become service records.
 
-8. View maintenance history and a per-service status for each bike. Status is calculated where a verified interval exists, shown as condition-based for items such as tires that have no fixed interval, and left unknown only when verified information is missing.
+8. Edit or delete individual maintenance records from the bike's page (deletion asks for confirmation); the status updates immediately. View maintenance history and a per-service status for each bike. Status is calculated where a verified interval exists, shown as condition-based for items such as tires that have no fixed interval, and left unknown only when verified information is missing.
 
 9. Sign in with Google and keep garage vehicles, conversations and maintenance records isolated by user.
 

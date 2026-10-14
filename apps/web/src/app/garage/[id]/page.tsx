@@ -48,6 +48,10 @@ export default function GarageVehiclePage() {
   const [savingOdometer, setSavingOdometer] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [startingChat, setStartingChat] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const applyLoaded = useCallback(([v, d, h]: BikeData) => {
     setVehicle(v);
@@ -100,6 +104,26 @@ export default function GarageVehiclePage() {
       refresh();
     } finally {
       setSavingOdometer(false);
+    }
+  }
+
+  async function deleteEvent(eventId: number) {
+    setDeletingId(eventId);
+    setDeleteError(null);
+    try {
+      await api.del(`/api/garage/vehicles/${id}/maintenance/${eventId}`);
+      setConfirmDeleteId(null);
+      refresh();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Already removed elsewhere; just reload the list.
+        setConfirmDeleteId(null);
+        refresh();
+      } else {
+        setDeleteError(e instanceof ApiError ? e.message : "Couldn't delete this maintenance event.");
+      }
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -190,7 +214,7 @@ export default function GarageVehiclePage() {
         </div>
 
         {showAddEvent && (
-          <AddMaintenanceForm
+          <MaintenanceForm
             garageVehicleId={id}
             onSaved={() => {
               setShowAddEvent(false);
@@ -203,22 +227,89 @@ export default function GarageVehiclePage() {
           <p className="text-sm text-muted">No maintenance recorded yet.</p>
         ) : (
           <ul className="space-y-2">
-            {history.map((event) => (
-              <li key={event.id} className="rounded-lg border border-border bg-panel px-4 py-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium">{SERVICE_TYPE_LABELS[event.serviceType]}</p>
-                  <p className="text-xs text-muted">
-                    {event.odometerKm != null ? `${Math.round(event.odometerKm).toLocaleString()} km` : ""}
-                    {event.odometerKm != null && event.performedAt ? " · " : ""}
-                    {event.performedAt ?? ""}
-                    {event.notes ? ` · ${event.notes}` : ""}
-                  </p>
-                </div>
-                <span className="text-[10px] rounded bg-black/5 px-1.5 py-0.5 text-muted shrink-0">
-                  {event.createdVia === "chat" ? "via chat" : "manual"}
-                </span>
-              </li>
-            ))}
+            {history.map((event) =>
+              editingId === event.id ? (
+                <li key={event.id}>
+                  <MaintenanceForm
+                    garageVehicleId={id}
+                    event={event}
+                    onCancel={() => setEditingId(null)}
+                    onSaved={() => {
+                      setEditingId(null);
+                      refresh();
+                    }}
+                  />
+                </li>
+              ) : (
+                <li key={event.id} className="rounded-lg border border-border bg-panel px-4 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{SERVICE_TYPE_LABELS[event.serviceType]}</p>
+                      <p className="text-xs text-muted break-words">
+                        {event.odometerKm != null ? `${Math.round(event.odometerKm).toLocaleString()} km` : ""}
+                        {event.odometerKm != null && event.performedAt ? " · " : ""}
+                        {event.performedAt ?? ""}
+                        {event.notes ? ` · ${event.notes}` : ""}
+                      </p>
+                    </div>
+                    <span className="text-[10px] rounded bg-black/5 px-1.5 py-0.5 text-muted shrink-0">
+                      {event.createdVia === "chat" ? "via chat" : "manual"}
+                    </span>
+                  </div>
+                  {confirmDeleteId === event.id ? (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                      <p className="text-sm text-red-700">
+                        Delete this record? This changes your maintenance status and can&apos;t be undone.
+                      </p>
+                      {deleteError && <p className="mt-1 text-sm text-red-700">{deleteError}</p>}
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => deleteEvent(event.id)}
+                          disabled={deletingId === event.id}
+                          className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deletingId === event.id ? "Deleting…" : "Delete"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmDeleteId(null);
+                            setDeleteError(null);
+                          }}
+                          className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-black/5"
+                        >
+                          Keep
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex gap-4">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingId(event.id);
+                          setConfirmDeleteId(null);
+                        }}
+                        className="py-1 text-sm font-medium text-accent hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDeleteId(event.id);
+                          setDeleteError(null);
+                        }}
+                        className="py-1 text-sm font-medium text-red-700 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ),
+            )}
           </ul>
         )}
       </div>
@@ -307,11 +398,21 @@ function ManufacturerScheduleLine({ card }: { card: MaintenanceStatusCard }) {
 
 const SERVICE_TYPES = Object.keys(SERVICE_TYPE_LABELS) as MaintenanceServiceType[];
 
-function AddMaintenanceForm({ garageVehicleId, onSaved }: { garageVehicleId: number; onSaved: () => void }) {
-  const [serviceType, setServiceType] = useState<MaintenanceServiceType>("ENGINE_OIL_CHANGE");
-  const [odometerKm, setOdometerKm] = useState("");
-  const [performedAt, setPerformedAt] = useState("");
-  const [notes, setNotes] = useState("");
+function MaintenanceForm({
+  garageVehicleId,
+  event,
+  onSaved,
+  onCancel,
+}: {
+  garageVehicleId: number;
+  event?: MaintenanceEvent;
+  onSaved: () => void;
+  onCancel?: () => void;
+}) {
+  const [serviceType, setServiceType] = useState<MaintenanceServiceType>(event?.serviceType ?? "ENGINE_OIL_CHANGE");
+  const [odometerKm, setOdometerKm] = useState(event?.odometerKm != null ? String(event.odometerKm) : "");
+  const [performedAt, setPerformedAt] = useState(event?.performedAt ?? "");
+  const [notes, setNotes] = useState(event?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -323,12 +424,18 @@ function AddMaintenanceForm({ garageVehicleId, onSaved }: { garageVehicleId: num
     setSaving(true);
     setError(null);
     try {
-      await api.post(`/api/garage/vehicles/${garageVehicleId}/maintenance`, {
+      const body = {
         serviceType,
         odometerKm: odometerKm ? Number(odometerKm) : null,
         performedAt: performedAt || null,
         notes: notes || null,
-      });
+      };
+      const base = `/api/garage/vehicles/${garageVehicleId}/maintenance`;
+      if (event) {
+        await api.patch(`${base}/${event.id}`, body);
+      } else {
+        await api.post(base, body);
+      }
       onSaved();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Couldn't save this maintenance event.");
@@ -390,8 +497,17 @@ function AddMaintenanceForm({ garageVehicleId, onSaved }: { garageVehicleId: num
         disabled={saving}
         className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
       >
-        {saving ? "Saving…" : "Save"}
+        {saving ? "Saving…" : event ? "Save changes" : "Save"}
       </button>
+      {onCancel && (
+        <button
+          type="button"
+          onClick={onCancel}
+          className="ml-2 rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-black/5"
+        >
+          Cancel
+        </button>
+      )}
     </div>
   );
 }
