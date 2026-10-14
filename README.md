@@ -175,7 +175,7 @@ The rest of the file is organised into consistent Markdown sections for specific
 
 The content is curated, model specific technical and maintenance information.
 
-The structure of these files (front matter, required sections, units, the convention for unknown values) is defined in [docs/knowledge-schema.md](docs/knowledge-schema.md). The corpus is checked with `cd pipelines && python -m knowledge.validate` (see that document for rules and the baseline).
+The structure of these files (front matter, required sections, units, the convention for unknown values) is defined in [docs/knowledge-schema.md](docs/knowledge-schema.md). The corpus is checked with `cd pipelines && python -m knowledge.validate` (see that document for rules and the baseline). Coverage per model, year and market, with per-entry completeness, is generated into [docs/knowledge-coverage.md](docs/knowledge-coverage.md) by `cd pipelines && python -m knowledge.coverage`; a test fails when the committed report is stale.
 
 ### Ingestion pipeline (`pipelines`)
 
