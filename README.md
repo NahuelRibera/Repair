@@ -175,7 +175,7 @@ The rest of the file is organised into consistent Markdown sections for specific
 
 The content is curated, model specific technical and maintenance information.
 
-The structure of these files (front matter, required sections, units, the convention for unknown values) is defined in [docs/knowledge-schema.md](docs/knowledge-schema.md).
+The structure of these files (front matter, required sections, units, the convention for unknown values) is defined in [docs/knowledge-schema.md](docs/knowledge-schema.md). The corpus is checked with `cd pipelines && python -m knowledge.validate` (see that document for rules and the baseline).
 
 ### Ingestion pipeline (`pipelines`)
 
