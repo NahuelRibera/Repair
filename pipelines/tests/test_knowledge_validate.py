@@ -86,6 +86,21 @@ def test_invalid_unit_spelling(tmp_path):
     assert all(f.severity == "error" and f.line for f in found)
 
 
+def test_millilitres_message_gives_the_litre_conversion(tmp_path):
+    found = run(tmp_path, doc(tail="\n- Fork oil: 400 mL.\n- Final drive oil: 150ml.\n- Coolant: 1,250 mL.\n"))
+    assert rules(found) == ["unit-invalid"] * 3
+    assert [f.message for f in found] == [
+        "unit 'mL' should be written 'L': divide the value by 1000 (400 mL = 0.4 L)",
+        "unit 'ml' should be written 'L': divide the value by 1000 (150 ml = 0.15 L)",
+        "unit 'mL' should be written 'L': divide the value by 1000 (1,250 mL = 1.25 L)",
+    ]
+
+
+def test_spelling_only_fixes_have_no_conversion(tmp_path):
+    found = run(tmp_path, doc(tail="\n- Tank: 17 litres.\n"))
+    assert [f.message for f in found] == ["unit 'litres' should be written 'L'"]
+
+
 def test_unknown_unit_in_fact_index_is_warning(tmp_path):
     index = INDEX + "| Gizmo | 5 zz |\n"
     found = run(tmp_path, doc(index=index))

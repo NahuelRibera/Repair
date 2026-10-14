@@ -19,6 +19,7 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import frontmatter
@@ -70,10 +71,12 @@ BAD_UNIT_SPELLINGS = {
     "MM": "mm", "Mm": "mm", "millimetres": "mm", "millimeters": "mm",
     "month(s)": "months", "mths": "months",
 }
+# Spellings of a scaled unit -> the divisor that converts the value to the canonical unit.
+BAD_UNIT_DIVISORS = {"ml": 1000, "mL": 1000}
 
 _NUM = r"\d[\d,]*(?:\.\d+)?"
 _BAD_RE = re.compile(
-    rf"(?<![\w.,]){_NUM}\s?({'|'.join(sorted(map(re.escape, BAD_UNIT_SPELLINGS), key=len, reverse=True))})(?![\w·/*.-]*\w)"
+    rf"(?<![\w.,])({_NUM})\s?({'|'.join(sorted(map(re.escape, BAD_UNIT_SPELLINGS), key=len, reverse=True))})(?![\w·/*.-]*\w)"
 )
 _UNIT_AFTER_NUM_RE = re.compile(rf"(?<![\w.,/]){_NUM}\s?([A-Za-z°³%][A-Za-z°³·/%]*)(?![A-Za-z0-9°³·/%])")
 _WORDS = frozenset({"and", "or", "to", "of", "per", "at", "for", "in", "on", "the", "each", "up", "x", "from", "with"})
@@ -223,8 +226,14 @@ def _check_units(pf: ParsedFile, index_rows: list[tuple[int, str, str]]) -> list
     out = []
     for i, line in enumerate(pf.body_lines):
         for m in _BAD_RE.finditer(line):
-            bad = m.group(1)
-            out.append(_finding(pf.file, i + pf.body_offset, "unit-invalid", f"unit {bad!r} should be written {BAD_UNIT_SPELLINGS[bad]!r}"))
+            num, bad = m.groups()
+            good = BAD_UNIT_SPELLINGS[bad]
+            msg = f"unit {bad!r} should be written {good!r}"
+            if bad in BAD_UNIT_DIVISORS:
+                div = BAD_UNIT_DIVISORS[bad]
+                value = format((Decimal(num.replace(",", "")) / div).normalize(), "f")
+                msg += f": divide the value by {div} ({num} {bad} = {value} {good})"
+            out.append(_finding(pf.file, i + pf.body_offset, "unit-invalid", msg))
     for ln, label, value in index_rows:
         for m in _UNIT_AFTER_NUM_RE.finditer(value):
             unit = m.group(1)

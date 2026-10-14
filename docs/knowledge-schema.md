@@ -35,7 +35,7 @@ a knowledge file.
 | `year-range` | error | `year_from` greater than `year_to` |
 | `path-mismatch` | error | directory or file name disagrees with manufacturer, model or `year_from` |
 | `section-missing` / `section-duplicate` / `section-order` | error | required sections absent, repeated or out of order |
-| `unit-invalid` | error | non-canonical spelling of a schema unit after a number (`Nm`, `kpa`, `litres`, `ml`, ...) |
+| `unit-invalid` | error | non-canonical spelling of a schema unit after a number (`Nm`, `kpa`, `litres`, `ml`, ...); for `ml`/`mL` the message also says to divide the value by 1000 (`400 mL` = `0.4 L`) |
 | `unit-unknown` | warning | fact-index value with a unit the schema and the accepted extras (`bar`, `kg`, `V`, `Ah`, `rpm`, `years`, ...) do not list |
 | `entry-duplicate` / `entry-overlap` | error | two files for the same manufacturer, model, market and variant with identical or overlapping years |
 | `fact-index-duplicate` | error | the fact index lists one fact twice with different values |
