@@ -1,0 +1,325 @@
+{
+ "version": 1,
+ "cases": [
+  {
+   "id": "mt07-2022-oil-level",
+   "model": "mt-07",
+   "year": 2022,
+   "question": "How do I check the engine oil level?",
+   "query": "oil level window settle",
+   "expectedSection": "Engine oil"
+  },
+  {
+   "id": "mt07-2022-drain-torque",
+   "model": "mt-07",
+   "year": 2022,
+   "question": "What torque does the oil drain bolt take?",
+   "query": "drain bolt torque sealing washer",
+   "expectedSection": "Oil filter and drain fasteners"
+  },
+  {
+   "id": "mt07-2025-plug-gap",
+   "model": "mt-07",
+   "year": 2025,
+   "question": "What is the spark plug gap?",
+   "query": "plug gap",
+   "expectedSection": "Spark plugs"
+  },
+  {
+   "id": "mt07-2018-chain-lube",
+   "model": "mt-07",
+   "year": 2018,
+   "question": "How do I clean and lubricate the chain?",
+   "query": "chain lubrication interval washing",
+   "expectedSection": "Drive chain"
+  },
+  {
+   "id": "mt07-2024-tire-pressure",
+   "model": "mt-07",
+   "year": 2024,
+   "question": "What tire pressure should I run?",
+   "query": "cold pressure tread depth",
+   "expectedSection": "Tires and wheels"
+  },
+  {
+   "id": "mt07-2023-fuse",
+   "model": "mt-07",
+   "year": 2023,
+   "question": "Which fuses protect the circuits?",
+   "query": "headlight fuse",
+   "expectedSection": "Fuse reference"
+  },
+  {
+   "id": "mt09-2021-coolant",
+   "model": "mt-09",
+   "year": 2021,
+   "question": "How do I check the coolant level?",
+   "query": "coolant reservoir",
+   "expectedSection": "Cooling system"
+  },
+  {
+   "id": "mt09-2024-brake",
+   "model": "mt-09",
+   "year": 2024,
+   "question": "My brake lever feels spongy.",
+   "query": "brake fluid hose interval",
+   "expectedSection": "Brakes"
+  },
+  {
+   "id": "mt09-2019-battery",
+   "model": "mt-09",
+   "year": 2019,
+   "question": "How do I maintain the battery?",
+   "query": "battery terminal charging",
+   "expectedSection": "Battery and charging"
+  },
+  {
+   "id": "mt09-2025-valve",
+   "model": "mt-09",
+   "year": 2025,
+   "question": "When is valve clearance due?",
+   "query": "valve clearance",
+   "expectedSection": "Valve clearance"
+  },
+  {
+   "id": "mt09-2022-air-filter",
+   "model": "mt-09",
+   "year": 2022,
+   "question": "How do I service the air filter?",
+   "query": "air filter element",
+   "expectedSection": "Air intake and filter"
+  },
+  {
+   "id": "mt09sp-2022-suspension",
+   "model": "mt-09-sp",
+   "year": 2022,
+   "question": "How do I adjust the rear shock preload?",
+   "query": "spring preload rebound damping",
+   "expectedSection": "Suspension"
+  },
+  {
+   "id": "mt09sp-2025-storage",
+   "model": "mt-09-sp",
+   "year": 2025,
+   "question": "How should I store the bike over winter?",
+   "query": "fuel stabilizer",
+   "expectedSection": "Storage"
+  },
+  {
+   "id": "mt09sp-2021-clutch",
+   "model": "mt-09-sp",
+   "year": 2021,
+   "question": "How do I check the clutch lever free play?",
+   "query": "lever free play cable",
+   "expectedSection": "Clutch"
+  },
+  {
+   "id": "tenere-2023-chain",
+   "model": "tenere-700",
+   "year": 2023,
+   "question": "How do I adjust the chain slack?",
+   "query": "dry rollers corrosion",
+   "expectedSection": "Drive chain"
+  },
+  {
+   "id": "tenere-2021-oil",
+   "model": "tenere-700",
+   "year": 2021,
+   "question": "How much engine oil does it take?",
+   "query": "oil level check",
+   "expectedSection": "Engine oil"
+  },
+  {
+   "id": "tenere-2025-transport",
+   "model": "tenere-700",
+   "year": 2025,
+   "question": "How do I tie the bike down for transport?",
+   "query": "transport tie",
+   "expectedSection": "Transport and lifting"
+  },
+  {
+   "id": "tenere-2024-suspension",
+   "model": "tenere-700",
+   "year": 2024,
+   "question": "How do I set the suspension for luggage?",
+   "query": "suspension rebound",
+   "expectedSection": "Suspension"
+  },
+  {
+   "id": "tenerewr-2026-brakes",
+   "model": "tenere-700-world-raid",
+   "year": 2026,
+   "question": "How do I check the brake pads?",
+   "query": "brake pad wear",
+   "expectedSection": "Brakes"
+  },
+  {
+   "id": "r7-2024-oil",
+   "model": "yzf-r7",
+   "year": 2024,
+   "question": "What oil and filter service does the R7 need?",
+   "query": "oil filter",
+   "expectedSection": "Engine oil and filter"
+  },
+  {
+   "id": "r7-2026-plugs",
+   "model": "yzf-r7",
+   "year": 2026,
+   "question": "When do the spark plugs need replacing?",
+   "query": "plug replace repeating schedule",
+   "expectedSection": "Spark plugs and ignition"
+  },
+  {
+   "id": "r7-2024-chain",
+   "model": "yzf-r7",
+   "year": 2024,
+   "question": "How do I check chain wear?",
+   "query": "distance rotate rear wheel",
+   "expectedSection": "Drive chain and sprockets"
+  },
+  {
+   "id": "r7-2026-battery",
+   "model": "yzf-r7",
+   "year": 2026,
+   "question": "How do I charge the battery?",
+   "query": "battery charger",
+   "expectedSection": "Battery and charging"
+  },
+  {
+   "id": "tracer9-2023-cooling",
+   "model": "tracer-9",
+   "year": 2023,
+   "question": "The bike is overheating.",
+   "query": "coolant overheating",
+   "expectedSection": "Cooling system"
+  },
+  {
+   "id": "tracer9-2025-fuse",
+   "model": "tracer-9",
+   "year": 2025,
+   "question": "Where is the fuse box?",
+   "query": "fuse",
+   "expectedSection": "Fuse reference"
+  },
+  {
+   "id": "tracer9-2021-valve",
+   "model": "tracer-9",
+   "year": 2021,
+   "question": "What is the valve clearance interval?",
+   "query": "valve clearance",
+   "expectedSection": "Valve clearance"
+  },
+  {
+   "id": "tracer9-2024-tire",
+   "model": "tracer-9",
+   "year": 2024,
+   "question": "How do I inspect the tires?",
+   "query": "tire tread",
+   "expectedSection": "Tires and wheels"
+  },
+  {
+   "id": "xsr900-2020-torque",
+   "model": "xsr900",
+   "year": 2020,
+   "question": "What are the key tightening torques?",
+   "query": "rear axle nut locknut",
+   "expectedSection": "Useful tightening torques"
+  },
+  {
+   "id": "xsr900-2015-brakes",
+   "model": "xsr900",
+   "year": 2015,
+   "question": "How do I inspect brake pads?",
+   "query": "brake pad",
+   "expectedSection": "Brakes"
+  },
+  {
+   "id": "xsr900-2024-suspension",
+   "model": "xsr900",
+   "year": 2024,
+   "question": "How is the front fork adjusted?",
+   "query": "fork preload",
+   "expectedSection": "Suspension"
+  },
+  {
+   "id": "xsr900-2017-storage",
+   "model": "xsr900",
+   "year": 2017,
+   "question": "How do I prepare the bike for storage?",
+   "query": "park dry battery weeks",
+   "expectedSection": "Storage"
+  },
+  {
+   "id": "mt03-2010-oil",
+   "model": "mt-03",
+   "year": 2010,
+   "question": "How do I check the oil level?",
+   "query": "oil level",
+   "expectedSection": "Engine oil"
+  },
+  {
+   "id": "mt03-2006-valve",
+   "model": "mt-03",
+   "year": 2006,
+   "question": "When should valve clearance be checked?",
+   "query": "valve clearance",
+   "expectedSection": "Valve clearance"
+  },
+  {
+   "id": "mt03-2012-chain",
+   "model": "mt-03",
+   "year": 2012,
+   "question": "How do I lubricate the chain?",
+   "query": "slack rear wheel position",
+   "expectedSection": "Drive chain"
+  },
+  {
+   "id": "mt10-2022-clutch",
+   "model": "mt-10",
+   "year": 2022,
+   "question": "How do I check the clutch?",
+   "query": "lever free play",
+   "expectedSection": "Clutch"
+  },
+  {
+   "id": "mt10-2016-cooling",
+   "model": "mt-10",
+   "year": 2016,
+   "question": "How do I check the coolant?",
+   "query": "coolant level",
+   "expectedSection": "Cooling system"
+  },
+  {
+   "id": "mt10-2024-fuse",
+   "model": "mt-10",
+   "year": 2024,
+   "question": "Which fuse protects the headlight?",
+   "query": "fuse",
+   "expectedSection": "Fuse reference"
+  },
+  {
+   "id": "r6-2020-spark",
+   "model": "yzf-r6",
+   "year": 2020,
+   "question": "What spark plug does the R6 use?",
+   "query": "plug gap torque",
+   "expectedSection": "Spark plugs and ignition"
+  },
+  {
+   "id": "r6-2008-chain",
+   "model": "yzf-r6",
+   "year": 2008,
+   "question": "How tight should the chain be?",
+   "query": "chain slack rear wheel",
+   "expectedSection": "Drive chain"
+  },
+  {
+   "id": "r6-2015-brakes",
+   "model": "yzf-r6",
+   "year": 2015,
+   "question": "How do I bleed the brakes?",
+   "query": "brake fluid",
+   "expectedSection": "Brakes"
+  }
+ ]
+}
