@@ -4,6 +4,65 @@ Automated regression coverage proving the hard vehicle filter actually
 prevents cross-model/cross-year contamination, plus a record of the live
 manual verification performed during the motorcycle pivot.
 
+## Retrieval evaluation set
+
+`apps/api/src/test/java/dev/repair/api/motochat/MotoRetrievalEvaluationIT.java`
+runs a fixed question set against the real curated corpus in
+`knowledge/motorcycles/`. It makes retrieval changes measurable and catches
+regressions.
+
+**Setup.** The test chunks every knowledge file the way the ingestion
+pipeline does (`heading-v1`, a Java port of `pipelines/embeddings/chunker.py`),
+loads the chunks into a Testcontainers Postgres without embeddings and calls
+`MotoRetrievalService.hybridSearch` for each question. No network or OpenAI
+call is made. Because chunks have no embedding, the vector pool is empty and
+the run measures the lexical (full-text) half of hybrid search. Vector
+quality is not covered by this test.
+
+**Dataset.** `apps/api/src/test/resources/retrieval/retrieval-eval-v1.json`
+(version 1) has 40 questions across 11 models (MT-07, MT-09, MT-09 SP,
+MT-10, MT-03, Ténéré 700, Ténéré 700 World Raid, Tracer 9, XSR900, YZF-R6,
+YZF-R7) and model years 2006–2026. Each case has:
+
+| Field | Meaning |
+|---|---|
+| `id` | Unique, stable identifier |
+| `model` | Model directory slug under `knowledge/motorcycles/yamaha/` |
+| `year` | Model year the rider selected |
+| `question` | The rider's question, for readers |
+| `query` | Keywords sent to retrieval. Full-text search requires every term to occur in a chunk, so these are chosen to be present in the expected section |
+| `expectedSection` | Level-2 heading of the section that must be retrieved |
+
+A separate test checks that the dataset has at least 30 cases, 6 models and 3
+years, that ids are unique, and that every case points to an existing corpus
+document and section, so editing the knowledge files cannot silently
+invalidate the set.
+
+**Metrics** (printed as a `RETRIEVAL-EVAL` line, followed by one line per miss):
+
+- **Isolation**: share of questions whose results (up to 20 chunks) all come
+  from the selected model and from a document whose year range covers the
+  selected year. Threshold: `1.0`. Any violation fails the test and is listed.
+- **Hit rate at k**: share of questions where a chunk of the expected section
+  is among the top `k = 5` results. Threshold: `0.80`.
+- **MRR**: mean reciprocal rank of the expected section. Reported only, not
+  asserted.
+
+**Thresholds.** They are the constants `MIN_ISOLATION` and `MIN_HIT_RATE_AT_K`
+in the test. Isolation must stay at 1.0. The hit-rate threshold was set with
+margin below the rate expected from an offline approximation of the ranking;
+the first verification-job run should be used to read the printed baseline,
+and the constant should then be raised to just below it. Never lower a
+threshold to make a regression pass. Fix the retrieval change or justify the
+new value in the pull request.
+
+**Extending the set.** Add an object to `retrieval-eval-v1.json`. Pick a
+section that exists in that model-year file, write a `query` whose terms all
+occur in the section body (headings are not part of the chunk content), run
+the test and read the printed rank. Cover new models and years first. For a
+change to the question semantics or chunking, add a new versioned file
+instead of editing v1, so results stay comparable.
+
 ## Automated tests
 
 `apps/api/src/test/java/dev/repair/api/motochat/MotoRetrievalServiceIT.java`
