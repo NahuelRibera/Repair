@@ -44,17 +44,44 @@ invalidate the set.
   from the selected model and from a document whose year range covers the
   selected year. Threshold: `1.0`. Any violation fails the test and is listed.
 - **Hit rate at k**: share of questions where a chunk of the expected section
-  is among the top `k = 5` results. Threshold: `0.80`.
+  is among the top `k = 5` results. Threshold: `0.875`.
 - **MRR**: mean reciprocal rank of the expected section. Reported only, not
   asserted.
 
+**Scope.** This is a lexical-only evaluation. It uses the curated `query`
+keywords, not the rider's `question` and not the retrieval query that chat
+builds from conversation history, and it does not exercise embeddings or the
+vector half of the fusion. Treat hit@5 as an optimistic upper bound for
+keyword retrieval, not as a measure of end-to-end answer quality.
+
+**Baseline (v1, first CI run, Testcontainers Postgres).**
+
+| Metric | Value |
+|---|---|
+| Questions | 40 |
+| Isolation | 1.000 |
+| hit@5 | 0.900 (36/40) |
+| MRR | 0.686 |
+
+Missed cases (expected section not in the top 20 results):
+
+| Case | Expected section |
+|---|---|
+| `mt07-2022-oil-level` | Engine oil |
+| `mt07-2022-drain-torque` | Oil filter and drain fasteners |
+| `mt07-2018-chain-lube` | Drive chain |
+| `tenere-2021-oil` | Engine oil |
+
+Every query term occurs somewhere in the expected section, so these misses
+are not explained by missing vocabulary. Possible causes are terms split
+across chunk boundaries or ranking against other sections; they have not been
+investigated and are kept in the set rather than edited to raise the score.
+
 **Thresholds.** They are the constants `MIN_ISOLATION` and `MIN_HIT_RATE_AT_K`
-in the test. Isolation must stay at 1.0. The hit-rate threshold was set with
-margin below the rate expected from an offline approximation of the ranking;
-the first verification-job run should be used to read the printed baseline,
-and the constant should then be raised to just below it. Never lower a
-threshold to make a regression pass. Fix the retrieval change or justify the
-new value in the pull request.
+in the test. Isolation must stay at 1.0. The hit-rate threshold is `0.875`
+(35/40), one case below the CI baseline. Never lower a threshold to make a
+regression pass. Fix the retrieval change or justify the new value in the
+pull request. Raise it when misses are fixed.
 
 **Extending the set.** Add an object to `retrieval-eval-v1.json`. Pick a
 section that exists in that model-year file, write a `query` whose terms all

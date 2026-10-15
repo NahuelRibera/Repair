@@ -50,8 +50,8 @@ class MotoRetrievalEvaluationIT {
 
     /** No retrieved chunk may come from another model or outside the selected year. */
     private static final double MIN_ISOLATION = 1.0;
-    /** Share of questions whose expected section appears in the top K chunks. */
-    private static final double MIN_HIT_RATE_AT_K = 0.80;
+    /** Share of questions whose expected section appears in the top K chunks (CI baseline 0.900, 36/40). */
+    private static final double MIN_HIT_RATE_AT_K = 0.875;
 
     private static final int MAX_WORDS_PER_CHUNK = 220;
     private static final int OVERLAP_WORDS = 30;
