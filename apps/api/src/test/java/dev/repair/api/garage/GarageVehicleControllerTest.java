@@ -44,6 +44,9 @@ class GarageVehicleControllerTest {
     @Mock
     private MotorcycleCatalogRepository catalogRepository;
 
+    @Mock
+    private OdometerConsistencyService odometerConsistency;
+
     private GarageVehicleController controller;
 
     @BeforeEach
@@ -51,7 +54,7 @@ class GarageVehicleControllerTest {
         AuthenticatedUserContext currentUser = new AuthenticatedUserContext();
         currentUser.setUser(new AppUserDto(VISITOR_ID, "google-sub-101", "rider@example.test", "Test Rider",
                 null, OffsetDateTime.now(), OffsetDateTime.now()));
-        controller = new GarageVehicleController(garageVehicleRepository, catalogRepository, currentUser);
+        controller = new GarageVehicleController(garageVehicleRepository, catalogRepository, currentUser, odometerConsistency);
 
         // lenient() — only the create() tests consult the catalog; the
         // delete() tests below never touch it, and strict stubbing would
@@ -102,6 +105,30 @@ class GarageVehicleControllerTest {
         // allowDuplicate=true must never even consult findExisting — the
         // rider explicitly asked to add another one.
         verify(garageVehicleRepository, never()).findExisting(anyLong(), anyLong(), anyInt());
+    }
+
+    @Test
+    void odometerBelowServiceHistoryIsRejectedAndNothingIsWritten() {
+        when(garageVehicleRepository.isOwned(VISITOR_ID, 42L)).thenReturn(true);
+        org.mockito.Mockito.doThrow(new OdometerConflictException(
+                OdometerConflictException.BELOW_SERVICE_HISTORY, "too low", 20000.0))
+                .when(odometerConsistency).checkOdometerUpdate(42L, 15000.0, false);
+
+        assertThatThrownBy(() -> controller.update(42L, new UpdateGarageVehicleRequest(null, 15000.0)))
+                .isInstanceOf(OdometerConflictException.class);
+        verify(garageVehicleRepository, never()).update(anyLong(), anyLong(), any(), any());
+    }
+
+    @Test
+    void confirmedCorrectionIsPassedToTheConsistencyCheckAndSaved() {
+        when(garageVehicleRepository.isOwned(VISITOR_ID, 42L)).thenReturn(true);
+        when(garageVehicleRepository.update(VISITOR_ID, 42L, null, 15000.0)).thenReturn(true);
+        when(garageVehicleRepository.find(VISITOR_ID, 42L)).thenReturn(Optional.of(sampleDto(42L)));
+
+        controller.update(42L, new UpdateGarageVehicleRequest(null, 15000.0, true));
+
+        verify(odometerConsistency).checkOdometerUpdate(42L, 15000.0, true);
+        verify(garageVehicleRepository).update(VISITOR_ID, 42L, null, 15000.0);
     }
 
     @Test

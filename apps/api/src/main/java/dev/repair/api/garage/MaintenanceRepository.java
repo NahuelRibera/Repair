@@ -220,6 +220,15 @@ public class MaintenanceRepository {
                 .list();
     }
 
+    /** Highest odometer reading among the vehicle's service records, or null when none has one. */
+    public Double maxServiceOdometer(long garageVehicleId) {
+        return jdbcClient.sql("SELECT max(odometer_km) FROM maintenance_events WHERE garage_vehicle_id = :garageVehicleId")
+                .param("garageVehicleId", garageVehicleId)
+                .query(Double.class)
+                .optional()
+                .orElse(null);
+    }
+
     /** Latest event per service_type — the input the maintenance
      * dashboard's status calculation needs (see MaintenanceStatusService).
      * "Latest" here means "at the highest odometer reading" (how far

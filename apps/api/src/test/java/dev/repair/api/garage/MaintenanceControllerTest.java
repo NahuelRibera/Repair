@@ -38,6 +38,9 @@ class MaintenanceControllerTest {
     @Mock
     private MaintenanceStatusService statusService;
 
+    @Mock
+    private OdometerConsistencyService odometerConsistency;
+
     private MaintenanceController controller;
 
     @BeforeEach
@@ -46,7 +49,7 @@ class MaintenanceControllerTest {
         currentUser.setUser(new AppUserDto(USER_ID, "sub", "rider@example.test", "Rider",
                 null, OffsetDateTime.now(), OffsetDateTime.now()));
         controller = new MaintenanceController(garageVehicleRepository, maintenanceRepository,
-                preferenceRepository, statusService, currentUser, new ObjectMapper());
+                preferenceRepository, statusService, currentUser, new ObjectMapper(), odometerConsistency);
     }
 
     private static MaintenanceEventDto dto(double km) {
@@ -63,6 +66,32 @@ class MaintenanceControllerTest {
                 new CreateMaintenanceEventRequest("ENGINE_OIL_CHANGE", 19000.0, null, "n"));
 
         assertThat(result.odometerKm()).isEqualTo(19000.0);
+    }
+
+    @Test
+    void creatingAServiceAboveTheOdometerIsRejectedWithoutWriting() {
+        when(garageVehicleRepository.isOwned(USER_ID, VEHICLE_ID)).thenReturn(true);
+        org.mockito.Mockito.doThrow(new OdometerConflictException(
+                OdometerConflictException.SERVICE_ABOVE_ODOMETER, "above", 30000.0))
+                .when(odometerConsistency).applyServiceMileage(VEHICLE_ID, 30000.0, false);
+
+        assertThatThrownBy(() -> controller.createMaintenance(VEHICLE_ID,
+                new CreateMaintenanceEventRequest("ENGINE_OIL_CHANGE", 30000.0, null, null)))
+                .isInstanceOf(OdometerConflictException.class);
+        verify(maintenanceRepository, never()).createEvent(anyLong(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void creatingAServiceWithUpdateOdometerAsksTheServiceToRaiseIt() {
+        when(garageVehicleRepository.isOwned(USER_ID, VEHICLE_ID)).thenReturn(true);
+        when(maintenanceRepository.createEvent(VEHICLE_ID, "ENGINE_OIL_CHANGE", 30000.0, null, null, "manual"))
+                .thenReturn(EVENT_ID);
+        when(maintenanceRepository.listForOwnedVehicle(USER_ID, VEHICLE_ID)).thenReturn(java.util.List.of(dto(30000.0)));
+
+        controller.createMaintenance(VEHICLE_ID,
+                new CreateMaintenanceEventRequest("ENGINE_OIL_CHANGE", 30000.0, null, null, true));
+
+        verify(odometerConsistency).applyServiceMileage(VEHICLE_ID, 30000.0, true);
     }
 
     @Test

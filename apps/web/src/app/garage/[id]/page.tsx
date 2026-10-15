@@ -46,6 +46,8 @@ export default function GarageVehiclePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [odometerDraft, setOdometerDraft] = useState("");
   const [savingOdometer, setSavingOdometer] = useState(false);
+  const [odometerError, setOdometerError] = useState<string | null>(null);
+  const [needsCorrectionConfirm, setNeedsCorrectionConfirm] = useState(false);
   const [showAddEvent, setShowAddEvent] = useState(false);
   const [startingChat, setStartingChat] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -95,13 +97,18 @@ export default function GarageVehiclePage() {
     };
   }, [id, applyLoaded, handleLoadError]);
 
-  async function saveOdometer() {
+  async function saveOdometer(confirmCorrection = false) {
     const value = Number(odometerDraft);
     if (!odometerDraft || Number.isNaN(value) || value < 0) return;
     setSavingOdometer(true);
+    setOdometerError(null);
+    setNeedsCorrectionConfirm(false);
     try {
-      await api.patch<GarageVehicle>(`/api/garage/vehicles/${id}`, { currentOdometerKm: value });
+      await api.patch<GarageVehicle>(`/api/garage/vehicles/${id}`, { currentOdometerKm: value, confirmCorrection });
       refresh();
+    } catch (e) {
+      setOdometerError(e instanceof ApiError ? e.message : "Couldn't save the odometer.");
+      setNeedsCorrectionConfirm(e instanceof ApiError && e.code === "ODOMETER_BELOW_SERVICE_HISTORY");
     } finally {
       setSavingOdometer(false);
     }
@@ -186,13 +193,28 @@ export default function GarageVehiclePage() {
             />
             <button
               type="button"
-              onClick={saveOdometer}
+              onClick={() => saveOdometer()}
               disabled={savingOdometer}
               className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-black/5 disabled:opacity-50"
             >
               Save
             </button>
           </div>
+          {odometerError && (
+            <div className="mt-2 text-sm text-red-700" role="alert">
+              <p>{odometerError}</p>
+              {needsCorrectionConfirm && (
+                <button
+                  type="button"
+                  onClick={() => saveOdometer(true)}
+                  disabled={savingOdometer}
+                  className="mt-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-black/5 disabled:opacity-50"
+                >
+                  Yes, correct the odometer
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-3">Maintenance status</h2>
@@ -415,20 +437,23 @@ function MaintenanceForm({
   const [notes, setNotes] = useState(event?.notes ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offeredOdometerKm, setOfferedOdometerKm] = useState<number | null>(null);
 
-  async function submit() {
+  async function submit(updateOdometer = false) {
     if (!odometerKm && !performedAt) {
       setError("Enter an odometer reading, a date, or both.");
       return;
     }
     setSaving(true);
     setError(null);
+    setOfferedOdometerKm(null);
     try {
       const body = {
         serviceType,
         odometerKm: odometerKm ? Number(odometerKm) : null,
         performedAt: performedAt || null,
         notes: notes || null,
+        updateOdometer,
       };
       const base = `/api/garage/vehicles/${garageVehicleId}/maintenance`;
       if (event) {
@@ -439,6 +464,9 @@ function MaintenanceForm({
       onSaved();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Couldn't save this maintenance event.");
+      if (e instanceof ApiError && e.code === "SERVICE_ABOVE_ODOMETER") {
+        setOfferedOdometerKm(e.suggestedOdometerKm ?? null);
+      }
     } finally {
       setSaving(false);
     }
@@ -446,7 +474,21 @@ function MaintenanceForm({
 
   return (
     <div className="rounded-xl border border-border bg-panel p-4 mb-4 space-y-3">
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {error && (
+        <div className="text-sm text-red-700" role="alert">
+          <p>{error}</p>
+          {offeredOdometerKm != null && (
+            <button
+              type="button"
+              onClick={() => submit(true)}
+              disabled={saving}
+              className="mt-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground hover:bg-black/5 disabled:opacity-50"
+            >
+              Update odometer to {Math.round(offeredOdometerKm).toLocaleString()} km and save
+            </button>
+          )}
+        </div>
+      )}
       <div>
         <label className="block text-xs font-medium text-muted mb-1">Service type</label>
         <select
@@ -493,7 +535,7 @@ function MaintenanceForm({
       </div>
       <button
         type="button"
-        onClick={submit}
+        onClick={() => submit()}
         disabled={saving}
         className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
       >

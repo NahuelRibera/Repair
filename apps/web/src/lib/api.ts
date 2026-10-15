@@ -1,8 +1,12 @@
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  code?: string;
+  suggestedOdometerKm?: number;
+  constructor(status: number, message: string, code?: string, suggestedOdometerKm?: number) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.suggestedOdometerKm = suggestedOdometerKm;
   }
 }
 
@@ -35,13 +39,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let message = res.statusText;
+    let code: string | undefined;
+    let suggested: number | undefined;
     try {
       const body = await res.json();
       if (body?.error) message = body.error;
+      if (typeof body?.code === "string") code = body.code;
+      if (typeof body?.suggestedOdometerKm === "number") suggested = body.suggestedOdometerKm;
     } catch {
       // ignore body parse failure, fall back to statusText
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, code, suggested);
   }
   if (res.status === 204) {
     return undefined as T;
