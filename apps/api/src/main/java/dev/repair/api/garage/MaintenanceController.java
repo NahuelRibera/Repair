@@ -25,12 +25,15 @@ public class MaintenanceController {
     private final MaintenanceStatusService statusService;
     private final AuthenticatedUserContext currentUser;
     private final ObjectMapper objectMapper;
+    private final OdometerConsistencyService odometerConsistency;
 
     public MaintenanceController(
             GarageVehicleRepository garageVehicleRepository, MaintenanceRepository maintenanceRepository,
             VehiclePreferenceRepository preferenceRepository, MaintenanceStatusService statusService,
-            AuthenticatedUserContext currentUser, ObjectMapper objectMapper
+            AuthenticatedUserContext currentUser, ObjectMapper objectMapper,
+            OdometerConsistencyService odometerConsistency
     ) {
+        this.odometerConsistency = odometerConsistency;
         this.garageVehicleRepository = garageVehicleRepository;
         this.maintenanceRepository = maintenanceRepository;
         this.preferenceRepository = preferenceRepository;
@@ -50,6 +53,7 @@ public class MaintenanceController {
     public MaintenanceEventDto createMaintenance(@PathVariable long id, @Valid @RequestBody CreateMaintenanceEventRequest request) {
         requireOwned(id);
         validate(request);
+        odometerConsistency.applyServiceMileage(id, request.odometerKm(), Boolean.TRUE.equals(request.updateOdometer()));
         long eventId = maintenanceRepository.createEvent(
                 id, request.serviceType(), request.odometerKm(), request.performedAt(), request.notes(), "manual"
         );
@@ -66,6 +70,7 @@ public class MaintenanceController {
     ) {
         requireOwned(id);
         validate(request);
+        odometerConsistency.applyServiceMileage(id, request.odometerKm(), Boolean.TRUE.equals(request.updateOdometer()));
         return maintenanceRepository.updateOwnedEvent(
                         currentUser.getUserId(), id, eventId, request.serviceType(), request.odometerKm(),
                         request.performedAt(), request.notes())

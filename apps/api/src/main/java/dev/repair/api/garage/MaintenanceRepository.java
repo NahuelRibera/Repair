@@ -230,6 +230,15 @@ public class MaintenanceRepository {
      * and the newest DB row is not necessarily the newest service.
      * NULLS LAST falls back to date/insertion order only when an event
      * genuinely has no odometer reading at all. */
+    /** Highest odometer reading among the vehicle's service records, or null when none has one. */
+    public Double maxServiceOdometer(long garageVehicleId) {
+        return jdbcClient.sql("SELECT max(odometer_km) FROM maintenance_events WHERE garage_vehicle_id = :garageVehicleId")
+                .param("garageVehicleId", garageVehicleId)
+                .query(Double.class)
+                .optional()
+                .orElse(null);
+    }
+
     public Map<String, MaintenanceEventDto> latestEventByType(long garageVehicleId) {
         return jdbcClient.sql(
                         """

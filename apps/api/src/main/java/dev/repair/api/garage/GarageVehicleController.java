@@ -24,11 +24,14 @@ public class GarageVehicleController {
     private final GarageVehicleRepository garageVehicleRepository;
     private final MotorcycleCatalogRepository catalogRepository;
     private final AuthenticatedUserContext currentUser;
+    private final OdometerConsistencyService odometerConsistency;
 
     public GarageVehicleController(
             GarageVehicleRepository garageVehicleRepository, MotorcycleCatalogRepository catalogRepository,
-            AuthenticatedUserContext currentUser
+            AuthenticatedUserContext currentUser,
+            OdometerConsistencyService odometerConsistency
     ) {
+        this.odometerConsistency = odometerConsistency;
         this.garageVehicleRepository = garageVehicleRepository;
         this.catalogRepository = catalogRepository;
         this.currentUser = currentUser;
@@ -75,6 +78,11 @@ public class GarageVehicleController {
         if (request.currentOdometerKm() != null && request.currentOdometerKm() < 0) {
             throw new BadRequestException("Odometer cannot be negative");
         }
+        if (!garageVehicleRepository.isOwned(currentUser.getUserId(), id)) {
+            throw new NotFoundException("Garage vehicle not found");
+        }
+        odometerConsistency.checkOdometerUpdate(
+                id, request.currentOdometerKm(), Boolean.TRUE.equals(request.confirmCorrection()));
         boolean updated = garageVehicleRepository.update(currentUser.getUserId(), id, request.nickname(), request.currentOdometerKm());
         if (!updated) {
             throw new NotFoundException("Garage vehicle not found");

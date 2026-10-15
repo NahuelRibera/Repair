@@ -1,5 +1,6 @@
 package dev.repair.api.common;
 
+import dev.repair.api.garage.OdometerConflictException;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(BadRequestException.class)
     public ResponseEntity<Map<String, String>> handleBadRequest(BadRequestException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(OdometerConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleOdometerConflict(OdometerConflictException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                "error", ex.getMessage(), "code", ex.code(), "suggestedOdometerKm", ex.suggestedOdometerKm()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
