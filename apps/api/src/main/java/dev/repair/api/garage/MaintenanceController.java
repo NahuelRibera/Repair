@@ -6,6 +6,7 @@ import dev.repair.api.auth.AuthenticatedUserContext;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -48,8 +49,10 @@ public class MaintenanceController {
         return maintenanceRepository.listForOwnedVehicle(currentUser.getUserId(), id);
     }
 
+    /** Transactional so an odometer raised for this service rolls back if the event write fails. */
     @PostMapping("/api/garage/vehicles/{id}/maintenance")
     @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
     public MaintenanceEventDto createMaintenance(@PathVariable long id, @Valid @RequestBody CreateMaintenanceEventRequest request) {
         requireOwned(id);
         validate(request);
@@ -63,8 +66,10 @@ public class MaintenanceController {
                 .orElseThrow(() -> new IllegalStateException("Maintenance event vanished immediately after creation"));
     }
 
-    /** Full replacement of the editable fields, validated exactly like creation. */
+    /** Full replacement of the editable fields, validated exactly like creation. Transactional so a
+     * raised odometer rolls back when the event is not found or the write fails. */
     @PatchMapping("/api/garage/vehicles/{id}/maintenance/{eventId}")
+    @Transactional
     public MaintenanceEventDto updateMaintenance(
             @PathVariable long id, @PathVariable long eventId, @Valid @RequestBody CreateMaintenanceEventRequest request
     ) {
