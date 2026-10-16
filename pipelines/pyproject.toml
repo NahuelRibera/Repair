@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Reproducible ingestion and knowledge-corpus embedding CLI for Repair V2."
 requires-python = ">=3.11"
 dependencies = [
-    "pandas>=2.2,<3",
+    "pandas>=2.2,<4",
     "psycopg[binary]>=3.2,<4",
     "python-dotenv>=1.0,<2",
     "openai>=1.50,<2",
