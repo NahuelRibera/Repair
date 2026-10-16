@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,6 +30,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tools.jackson.databind.json.JsonMapper;
@@ -1913,5 +1915,140 @@ class MotoChatOrchestrationServiceTest {
         org.junit.jupiter.api.Assertions.assertThrows(dev.repair.api.common.NotFoundException.class,
                 () -> service.confirmPendingAction(VISITOR_ID, SESSION_ID, 77L));
         verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+    }
+
+    @Test
+    void modelAskedOdometerQuestionIsReplacedByTheStagedRequestAndTheReplyIsNotSaved() {
+        stubOdometerAge(90);
+        stubRetrieval();
+        stubGeneration(answerJson("").replace("\"followUpQuestions\":[]",
+                "\"followUpQuestions\":[\"What's your current odometer reading?\",\"When did you last change the oil?\"]"));
+        // Wording the due-question regex does not recognise: only the
+        // model's own question signals that a reading is needed.
+        String firstQuestion = "Thinking about my oil, am I good for now?";
+
+        MotoChatTurnResult first = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, firstQuestion);
+
+        assertThat(first.answer().followUpQuestions()).containsExactly(
+                MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION, "When did you last change the oil?");
+        ArgumentCaptor<String> persistedJson = ArgumentCaptor.forClass(String.class);
+        verify(sessionRepository).insertMessage(eq(SESSION_ID), eq("assistant"), any(), persistedJson.capture());
+
+        when(sessionRepository.recentMessages(eq(SESSION_ID), anyInt())).thenReturn(List.of(
+                new MotoMessageDto(1L, "user", firstQuestion, null, OffsetDateTime.now()),
+                new MotoMessageDto(2L, "assistant", first.answer().summary(), persistedJson.getValue(), OffsetDateTime.now())));
+        stubGeneration(answerJson(odometerProposal("CONFIRMED_COMPLETED", 21500.0)));
+        when(pendingActionRepository.createOdometerUpdate(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, 21500.0, null))
+                .thenReturn(11L);
+
+        MotoChatTurnResult reply = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "It reads 21,500 km.");
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        assertThat(reply.actionsTaken()).isEmpty();
+        assertThat(reply.pendingActions()).extracting(MotoPendingActionDto::id).containsExactly(11L);
+    }
+
+    @Test
+    void dueQuestionPhrasedAsNeedingAServiceAsksForAStaleOdometer() {
+        stubOdometerAge(90);
+        stubRetrieval();
+        stubGeneration(answerJson(""));
+
+        MotoChatTurnResult result = service.handleUserMessage(
+                VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "Do I need an oil change soon?");
+
+        assertThat(result.answer().followUpQuestions()).contains(MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION);
+    }
+
+    @Test
+    void modelAskingAtWhatMileageAPastServiceHappenedIsKept() {
+        stubOdometerAge(90);
+        stubRetrieval();
+        stubGeneration(answerJson("").replace("\"followUpQuestions\":[]",
+                "\"followUpQuestions\":[\"What was the odometer when you last changed the oil?\"]"));
+
+        MotoChatTurnResult result = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, DUE_QUESTION);
+
+        assertThat(result.answer().followUpQuestions()).containsExactly(
+                MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION, "What was the odometer when you last changed the oil?");
+    }
+
+    private void stubPendingConfirmation(double proposedKm, Double storedKm) {
+        var pending = new MotoPendingActionRepository.PendingAction(9L, GARAGE_VEHICLE_ID, proposedKm, "ENGINE_OIL_CHANGE");
+        when(pendingActionRepository.resolve(VISITOR_ID, SESSION_ID, 9L, "confirmed")).thenReturn(Optional.of(pending));
+        stubVehicleWithOdometer(storedKm);
+    }
+
+    @Test
+    void confirmingAValueBelowTheStoredOdometerIsRejectedAndMarkedFailed() {
+        stubPendingConfirmation(18500.0, 19200.0);
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        verify(pendingActionRepository).markFailed(9L);
+        assertThat(result.actionsTaken()).isEmpty();
+        assertThat(result.answer().summary()).contains("19,200 km").contains("nothing was changed");
+    }
+
+    @Test
+    void confirmingAValueBelowTheHighestRecordedServiceIsRejectedAndMarkedFailed() {
+        stubPendingConfirmation(1500.0, null);
+        when(maintenanceRepository.maxServiceOdometer(GARAGE_VEHICLE_ID)).thenReturn(15000.0);
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        verify(pendingActionRepository).markFailed(9L);
+        assertThat(result.actionsTaken()).isEmpty();
+        assertThat(result.answer().summary()).contains("15,000 km").contains("nothing was changed");
+    }
+
+    @Test
+    void confirmingTheStoredValueAgainIsAllowedSoItsReadingBecomesFresh() {
+        stubPendingConfirmation(19200.0, 19200.0);
+        when(garageVehicleRepository.updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 19200.0)).thenReturn(Optional.of(19200.0));
+        when(maintenanceRepository.latestEventByType(GARAGE_VEHICLE_ID)).thenReturn(Map.of());
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        assertThat(result.actionsTaken()).extracting(ActionTakenDto::type).containsExactly("odometer_updated");
+        verify(pendingActionRepository, never()).markFailed(anyLong());
+    }
+
+    @Test
+    void aWriteThatAffectsNoRowsIsReportedAndMarkedFailed() {
+        stubPendingConfirmation(18500.0, null);
+        when(garageVehicleRepository.updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 18500.0)).thenReturn(Optional.empty());
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        verify(pendingActionRepository).markFailed(9L);
+        assertThat(result.actionsTaken()).isEmpty();
+        assertThat(result.answer().summary()).contains("couldn't save");
+    }
+
+    @Test
+    void aWriteThatThrowsPropagatesSoTheTransactionLeavesTheActionPending() {
+        stubPendingConfirmation(18500.0, null);
+        doThrow(new org.springframework.dao.DataAccessResourceFailureException("simulated"))
+                .when(garageVehicleRepository).updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 18500.0);
+
+        org.junit.jupiter.api.Assertions.assertThrows(org.springframework.dao.DataAccessResourceFailureException.class,
+                () -> service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L));
+        verify(pendingActionRepository, never()).markFailed(anyLong());
+    }
+
+    @Test
+    void confirmingForAVehicleThatNoLongerExistsIsMarkedFailedWithoutWriting() {
+        var pending = new MotoPendingActionRepository.PendingAction(9L, GARAGE_VEHICLE_ID, 18500.0, null);
+        when(pendingActionRepository.resolve(VISITOR_ID, SESSION_ID, 9L, "confirmed")).thenReturn(Optional.of(pending));
+        when(garageVehicleRepository.find(VISITOR_ID, GARAGE_VEHICLE_ID)).thenReturn(Optional.empty());
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        verify(pendingActionRepository).markFailed(9L);
+        assertThat(result.answer().summary()).contains("nothing was changed");
     }
 }

@@ -99,7 +99,7 @@ public class GarageVehicleRepository {
                         UPDATE garage_vehicles
                         SET nickname = COALESCE(:nickname, nickname),
                             current_odometer_km = COALESCE(:odometer, current_odometer_km),
-                            odometer_updated_at = CASE WHEN :odometer IS NULL THEN odometer_updated_at ELSE now() END,
+                            odometer_updated_at = CASE WHEN CAST(:odometer AS NUMERIC) IS NULL THEN odometer_updated_at ELSE now() END,
                             updated_at = now()
                         WHERE id = :id AND user_id = :userId AND deleted_at IS NULL
                         """)
@@ -140,7 +140,8 @@ public class GarageVehicleRepository {
     }
 
     /** When the stored odometer value was last written; empty when no
-     * odometer is stored or the vehicle is not owned by this user. */
+     * odometer is stored, its write time is unknown (readings from before
+     * V12), or the vehicle is not owned by this user. */
     public Optional<java.time.OffsetDateTime> findOdometerUpdatedAt(long userId, long id) {
         return jdbcClient.sql(
                         """

@@ -34,6 +34,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Motorcycle counterpart of dev.repair.api.chat.ChatOrchestrationService.
@@ -459,8 +460,16 @@ public class MotoChatOrchestrationService {
                     + "|\\bnext\\s+(?:\\w+\\s+){0,2}(?:service|change|replacement|check|inspection)\\b"
                     + "|\\bwhen\\s+(?:should|do|does|must|can|will|is|am)\\b[^?.!]*\\b(?:change|replace|service|check|lube|adjust|flush|bleed)\\b"
                     + "|\\bhow\\s+(?:soon|long)\\b[^?.!]*\\b(?:change|replace|service)\\b"
-                    + "|\\btime\\s+to\\s+(?:change|replace|service)\\b",
+                    + "|\\btime\\s+(?:to|for)\\b[^?.!]*\\b(?:change|replace|replacement|service)\\b"
+                    + "|\\b(?:need|needs)\\b[^?.!]*\\b(?:change|replace|replacement|service|check|inspection)\\b"
+                    + "|\\bshould\\s+I\\b[^?.!]*\\b(?:change|replace|service)\\b",
             Pattern.CASE_INSENSITIVE);
+    /** A follow-up asking for the bike's current reading — not one asking
+     * at what mileage a past service was done. */
+    private static final Pattern ODOMETER_QUESTION = Pattern.compile(
+            "\\bodometer\\b|\\bcurrent\\s+(?:mileage|reading|km|kilomet)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PAST_SERVICE_QUESTION = Pattern.compile(
+            "\\b(?:last|previous|when\\s+you|did\\s+you)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern QUESTION_OPENER = Pattern.compile(
             "^\\s*(?:when|how|what|is|am|do|does|should|can)\\b", Pattern.CASE_INSENSITIVE);
 
@@ -687,21 +696,28 @@ public class MotoChatOrchestrationService {
         return null;
     }
 
-    /** For a maintenance-due question with a missing or stale odometer, ask
-     * for the current reading — unless this turn already supplied one or the
-     * model asked for it itself. */
+    private static boolean asksForCurrentOdometer(String question) {
+        return ODOMETER_QUESTION.matcher(question).find() && !PAST_SERVICE_QUESTION.matcher(question).find();
+    }
+
+    /** With a missing or stale odometer, a maintenance-due question — or a
+     * turn where the model itself asks for the reading — always asks with
+     * ODOMETER_REQUEST_QUESTION, replacing the model's own wording, so the
+     * reply is staged for confirmation and never written directly. Skipped
+     * when this turn already supplied a reading. */
     private MotoDiagnosticAnswer withOdometerRequest(ActionExecutionResult result, String userText, OdometerFreshness freshness) {
         MotoDiagnosticAnswer answer = result.answer();
         boolean odometerHandledThisTurn = !result.pendingActions().isEmpty()
                 || result.actionsTaken().stream().anyMatch(a -> "odometer_updated".equals(a.type()));
         List<String> questions = answer.followUpQuestions() == null ? List.of() : answer.followUpQuestions();
-        boolean alreadyAsked = questions.stream().anyMatch(q -> q.toLowerCase(Locale.ROOT).contains("odometer"));
-        if (!freshness.needsRefresh() || !isMaintenanceDueQuestion(userText) || odometerHandledThisTurn || alreadyAsked) {
+        boolean modelAskedForOdometer = questions.stream().anyMatch(MotoChatOrchestrationService::asksForCurrentOdometer);
+        if (!freshness.needsRefresh() || odometerHandledThisTurn
+                || !(isMaintenanceDueQuestion(userText) || modelAskedForOdometer)) {
             return answer;
         }
         List<String> withRequest = new ArrayList<>();
         withRequest.add(ODOMETER_REQUEST_QUESTION);
-        withRequest.addAll(questions);
+        questions.stream().filter(q -> !asksForCurrentOdometer(q)).forEach(withRequest::add);
         if (withRequest.size() > MAX_FOLLOW_UP_QUESTIONS) {
             withRequest = new ArrayList<>(withRequest.subList(0, MAX_FOLLOW_UP_QUESTIONS));
         }
@@ -712,21 +728,38 @@ public class MotoChatOrchestrationService {
         );
     }
 
-    /** The rider pressed confirm on a staged odometer update: write it,
-     * then answer again with the due status recomputed from the stored
-     * interval and history. */
+    /** The rider pressed confirm on a staged odometer update: check it
+     * again against the bike as stored now, write it, then answer again with
+     * the due status recomputed from the stored interval and history. One
+     * transaction, so a write that throws leaves the action pending rather
+     * than confirmed with nothing saved; a rejected or failed write marks it
+     * failed. */
+    @Transactional
     public MotoChatTurnResult confirmPendingAction(long userId, long sessionId, long actionId) {
         var pending = pendingActionRepository.resolve(userId, sessionId, actionId, "confirmed")
                 .orElseThrow(() -> new NotFoundException("Pending action not found or already resolved"));
-        GarageVehicleDto vehicle = garageVehicleRepository.find(userId, pending.garageVehicleId()).orElseThrow();
-        Optional<Double> persisted = garageVehicleRepository.updateOdometerIfOwned(userId, vehicle.id(), pending.odometerKm());
+        Optional<GarageVehicleDto> found = garageVehicleRepository.find(userId, pending.garageVehicleId());
+        if (found.isEmpty()) {
+            return failedConfirmation(sessionId, pending.id(), "I couldn't find that bike in your garage, so nothing was changed.");
+        }
+        GarageVehicleDto vehicle = found.get();
+        double proposedKm = pending.odometerKm();
+        // The proposal was checked when it was staged, but the garage may
+        // have changed since (another tab, the garage page, a new service).
+        if (vehicle.currentOdometerKm() != null && proposedKm < vehicle.currentOdometerKm()) {
+            return failedConfirmation(sessionId, pending.id(), "Your garage already shows " + formatKm(vehicle.currentOdometerKm())
+                    + " km, which is higher than " + formatKm(proposedKm) + " km, so nothing was changed. "
+                    + "If the stored reading is wrong, correct it on the garage page.");
+        }
+        Double highestServiceKm = maintenanceRepository.maxServiceOdometer(vehicle.id());
+        if (highestServiceKm != null && proposedKm < highestServiceKm) {
+            return failedConfirmation(sessionId, pending.id(), "Your service history includes a service at "
+                    + formatKm(highestServiceKm) + " km, which is higher than " + formatKm(proposedKm)
+                    + " km, so nothing was changed. If a reading is wrong, correct it on the garage page.");
+        }
+        Optional<Double> persisted = garageVehicleRepository.updateOdometerIfOwned(userId, vehicle.id(), proposedKm);
         if (persisted.isEmpty()) {
-            pendingActionRepository.markFailed(pending.id());
-            MotoDiagnosticAnswer failed = new MotoDiagnosticAnswer(
-                    "guidance", "I couldn't save that odometer reading, so nothing was changed.",
-                    List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null, null);
-            long failedId = persistAssistantMessage(sessionId, failed);
-            return new MotoChatTurnResult(failedId, failed, List.of(), List.of(), null);
+            return failedConfirmation(sessionId, pending.id(), "I couldn't save that odometer reading, so nothing was changed.");
         }
         double odometerKm = persisted.get();
         GarageVehicleDto updated = new GarageVehicleDto(
@@ -737,6 +770,14 @@ public class MotoChatOrchestrationService {
         sessionRepository.touchUpdatedAt(sessionId);
         return new MotoChatTurnResult(
                 messageId, answer, List.of(), List.of(new ActionTakenDto("odometer_updated", null, odometerKm, null)), null);
+    }
+
+    private MotoChatTurnResult failedConfirmation(long sessionId, long pendingId, String summary) {
+        pendingActionRepository.markFailed(pendingId);
+        MotoDiagnosticAnswer failed = new MotoDiagnosticAnswer(
+                "guidance", summary, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), null, null);
+        long failedId = persistAssistantMessage(sessionId, failed);
+        return new MotoChatTurnResult(failedId, failed, List.of(), List.of(), null);
     }
 
     public void dismissPendingAction(long userId, long sessionId, long actionId) {
