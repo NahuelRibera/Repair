@@ -7,10 +7,12 @@ import dev.repair.api.config.ChatProperties;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -41,6 +43,24 @@ public class MotoChatController {
             throw new BadRequestException("Message is too long (max " + chatProperties.maxMessageLength() + " characters)");
         }
         return orchestrationService.handleUserMessage(currentUser.getUserId(), sessionId, garageVehicleId, request.content().trim());
+    }
+
+    @PostMapping("/api/moto-sessions/{sessionId}/pending-actions/{actionId}/confirm")
+    public MotoChatTurnResult confirmPendingAction(@PathVariable long sessionId, @PathVariable long actionId) {
+        requireOwnedSession(sessionId);
+        return orchestrationService.confirmPendingAction(currentUser.getUserId(), sessionId, actionId);
+    }
+
+    @PostMapping("/api/moto-sessions/{sessionId}/pending-actions/{actionId}/dismiss")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void dismissPendingAction(@PathVariable long sessionId, @PathVariable long actionId) {
+        requireOwnedSession(sessionId);
+        orchestrationService.dismissPendingAction(currentUser.getUserId(), sessionId, actionId);
+    }
+
+    private void requireOwnedSession(long sessionId) {
+        sessionRepository.findGarageVehicleIdForSession(currentUser.getUserId(), sessionId)
+                .orElseThrow(() -> new NotFoundException("Conversation not found"));
     }
 
     @GetMapping("/api/moto-rag-runs/{requestId}")

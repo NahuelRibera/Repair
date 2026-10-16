@@ -17,7 +17,9 @@ import dev.repair.api.config.ChatProperties;
 import dev.repair.api.config.OpenAiProperties;
 import dev.repair.api.garage.GarageVehicleDto;
 import dev.repair.api.garage.GarageVehicleRepository;
+import dev.repair.api.garage.MaintenanceEventDto;
 import dev.repair.api.garage.MaintenanceRepository;
+import dev.repair.api.garage.MaintenanceStatusService;
 import dev.repair.api.garage.VehiclePreferenceRepository;
 import dev.repair.api.motorcycle.MotorcycleCatalogRepository;
 import java.time.OffsetDateTime;
@@ -64,24 +66,27 @@ class MotoChatOrchestrationServiceTest {
     private VehiclePreferenceRepository preferenceRepository;
     @Mock
     private MotorcycleCatalogRepository catalogRepository;
+    @Mock
+    private MotoPendingActionRepository pendingActionRepository;
 
     private ChatProperties chatProperties;
     private MotoChatOrchestrationService service;
 
     @BeforeEach
     void setUp() {
-        chatProperties = new ChatProperties(20, 2000, 6, 900, 1200);
+        chatProperties = new ChatProperties(20, 2000, 6, 900, 1200, 30);
         GarageVehicleDto vehicle = new GarageVehicleDto(
                 GARAGE_VEHICLE_ID, MODEL_ID, "Yamaha", "MT-07", 2025, null, null, 20000.0,
                 OffsetDateTime.now(), OffsetDateTime.now()
         );
-        when(garageVehicleRepository.find(VISITOR_ID, GARAGE_VEHICLE_ID)).thenReturn(Optional.of(vehicle));
-        when(ragRunRepository.start(any(), eq(SESSION_ID), eq(GARAGE_VEHICLE_ID), any())).thenReturn(100L);
-        when(ragRunRepository.findDebugByRequestId(any())).thenAnswer(inv -> new MotoRagRunDebugDto(
+        // lenient: the confirm/dismiss tests never start a chat turn.
+        lenient().when(garageVehicleRepository.find(VISITOR_ID, GARAGE_VEHICLE_ID)).thenReturn(Optional.of(vehicle));
+        lenient().when(ragRunRepository.start(any(), eq(SESSION_ID), eq(GARAGE_VEHICLE_ID), any())).thenReturn(100L);
+        lenient().when(ragRunRepository.findDebugByRequestId(any())).thenAnswer(inv -> new MotoRagRunDebugDto(
                 inv.getArgument(0).toString(), GARAGE_VEHICLE_ID, "Yamaha", "MT-07", 2025, null,
                 null, null, null, null, null, null, "ok", null, "[]"
         ));
-        when(sessionRepository.insertMessage(eq(SESSION_ID), any(), any(), any())).thenReturn(1L);
+        lenient().when(sessionRepository.insertMessage(eq(SESSION_ID), any(), any(), any())).thenReturn(1L);
         // Not every test reaches the point where these are consulted (e.g. the
         // missing-key and empty-retrieval short-circuits return earlier) —
         // lenient() avoids Mockito's strict-stubbing failure on those tests.
@@ -93,7 +98,8 @@ class MotoChatOrchestrationServiceTest {
                 chatProperties,
                 new OpenAiProperties("sk-test-key", "gpt-4.1-mini", "text-embedding-3-small", 1536, 30, 2),
                 openAiClient, retrievalService, ragRunRepository, sessionRepository, garageVehicleRepository,
-                maintenanceRepository, preferenceRepository, catalogRepository, JsonMapper.builder().build()
+                maintenanceRepository, preferenceRepository, catalogRepository, JsonMapper.builder().build(),
+                pendingActionRepository, new MaintenanceStatusService(catalogRepository)
         );
     }
 
@@ -160,7 +166,8 @@ class MotoChatOrchestrationServiceTest {
         var unconfigured = new MotoChatOrchestrationService(
                 chatProperties, new OpenAiProperties("", "gpt-4.1-mini", "text-embedding-3-small", 1536, 30, 2),
                 openAiClient, retrievalService, ragRunRepository, sessionRepository, garageVehicleRepository,
-                maintenanceRepository, preferenceRepository, catalogRepository, JsonMapper.builder().build()
+                maintenanceRepository, preferenceRepository, catalogRepository, JsonMapper.builder().build(),
+                pendingActionRepository, new MaintenanceStatusService(catalogRepository)
         );
 
         MotoChatTurnResult result = unconfigured.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "hello");
@@ -1733,5 +1740,178 @@ class MotoChatOrchestrationServiceTest {
         service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "last change 12000");
 
         verify(maintenanceRepository, never()).createEvent(anyLong(), any(), any(), any(), any(), any());
+    }
+
+    // --- Ask for a missing/stale odometer, stage the reply, write only on confirmation ---
+
+    private static final String DUE_QUESTION = "When is my next oil change due?";
+
+    private void stubVehicleWithOdometer(Double odometerKm) {
+        GarageVehicleDto vehicle = new GarageVehicleDto(
+                GARAGE_VEHICLE_ID, MODEL_ID, "Yamaha", "MT-07", 2025, null, null, odometerKm,
+                OffsetDateTime.now(), OffsetDateTime.now());
+        when(garageVehicleRepository.find(VISITOR_ID, GARAGE_VEHICLE_ID)).thenReturn(Optional.of(vehicle));
+    }
+
+    private void stubOdometerAge(int days) {
+        when(garageVehicleRepository.findOdometerUpdatedAt(VISITOR_ID, GARAGE_VEHICLE_ID))
+                .thenReturn(Optional.of(OffsetDateTime.now().minusDays(days)));
+    }
+
+    private void stubOdometerRequestedLastTurn() {
+        String previousAssistantJson = """
+                {"answerType":"guidance","summary":"I can't tell yet.","confirmedFacts":[],"contextUsed":[],
+                 "followUpQuestions":["%s"],"safeChecks":[],"cautions":[],"sourceChunkIds":[42]}
+                """.formatted(MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION);
+        when(sessionRepository.recentMessages(eq(SESSION_ID), anyInt())).thenReturn(List.of(
+                new MotoMessageDto(1L, "user", DUE_QUESTION, null, OffsetDateTime.now()),
+                new MotoMessageDto(2L, "assistant", "I can't tell yet.", previousAssistantJson, OffsetDateTime.now())
+        ));
+    }
+
+    @Test
+    void dueQuestionWithMissingOdometerAsksForTheCurrentReading() {
+        stubVehicleWithOdometer(null);
+        stubRetrieval();
+        stubGeneration(answerJson(""));
+
+        MotoChatTurnResult result = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, DUE_QUESTION);
+
+        assertThat(result.answer().followUpQuestions()).contains(MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION);
+        assertThat(result.pendingActions()).isEmpty();
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+    }
+
+    @Test
+    void dueQuestionWithStaleOdometerAsksForTheCurrentReading() {
+        stubOdometerAge(90);
+        stubRetrieval();
+        stubGeneration(answerJson(""));
+
+        MotoChatTurnResult result = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, DUE_QUESTION);
+
+        assertThat(result.answer().followUpQuestions()).contains(MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION);
+    }
+
+    @Test
+    void dueQuestionWithFreshOdometerDoesNotAsk() {
+        stubOdometerAge(5);
+        stubRetrieval();
+        stubGeneration(answerJson(""));
+
+        MotoChatTurnResult result = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, DUE_QUESTION);
+
+        assertThat(result.answer().followUpQuestions()).doesNotContain(MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION);
+    }
+
+    @Test
+    void nonDueQuestionWithMissingOdometerDoesNotAsk() {
+        stubVehicleWithOdometer(null);
+        stubRetrieval();
+        stubGeneration(answerJson(""));
+
+        MotoChatTurnResult result = service.handleUserMessage(
+                VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "What oil viscosity does the MT-07 use?");
+
+        assertThat(result.answer().followUpQuestions()).isEmpty();
+    }
+
+    @Test
+    void odometerReplyIsProposedAsAPendingActionAndNotSaved() {
+        stubVehicleWithOdometer(null);
+        stubOdometerRequestedLastTurn();
+        stubRetrieval();
+        stubGeneration(answerJson(odometerProposal("CONFIRMED_COMPLETED", 18500.0)));
+        when(pendingActionRepository.createOdometerUpdate(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, 18500.0, "ENGINE_OIL_CHANGE"))
+                .thenReturn(9L);
+
+        MotoChatTurnResult result = service.handleUserMessage(
+                VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "It reads 18,500 km right now.");
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        assertThat(result.actionsTaken()).isEmpty();
+        assertThat(result.pendingActions()).hasSize(1);
+        assertThat(result.pendingActions().get(0).id()).isEqualTo(9L);
+        assertThat(result.pendingActions().get(0).odometerKm()).isEqualTo(18500.0);
+        assertThat(result.answer().contextUsed()).anyMatch(c -> c.contains("not saved until you confirm"));
+        assertThat(result.answer().followUpQuestions()).doesNotContain(MotoChatOrchestrationService.ODOMETER_REQUEST_QUESTION);
+    }
+
+    @Test
+    void bareNumberReplyToTheOdometerRequestIsStagedEvenWhenTheModelProposesNothing() {
+        stubVehicleWithOdometer(null);
+        stubOdometerRequestedLastTurn();
+        stubRetrieval();
+        stubGeneration(answerJson(""));
+        when(pendingActionRepository.createOdometerUpdate(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, 18500.0, "ENGINE_OIL_CHANGE"))
+                .thenReturn(10L);
+
+        MotoChatTurnResult result = service.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "18500");
+
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+        assertThat(result.pendingActions()).extracting(MotoPendingActionDto::odometerKm).containsExactly(18500.0);
+    }
+
+    @Test
+    void hypotheticalMileageReplyIsNeverStagedOrSaved() {
+        stubVehicleWithOdometer(null);
+        stubOdometerRequestedLastTurn();
+        stubRetrieval();
+        stubGeneration(answerJson(odometerProposal("CONFIRMED_COMPLETED", 25000.0)));
+
+        MotoChatTurnResult result = service.handleUserMessage(
+                VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "If I were at 25,000 km, would it be due?");
+
+        assertThat(result.pendingActions()).isEmpty();
+        assertThat(result.actionsTaken()).isEmpty();
+        verify(pendingActionRepository, never()).createOdometerUpdate(anyLong(), anyLong(), anyLong(), anyDouble(), any());
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+    }
+
+    private void stubConfirmation(MotoPendingActionRepository.PendingAction pending, Map<String, dev.repair.api.motorcycle.MotorcycleFactDto> facts) {
+        when(pendingActionRepository.resolve(VISITOR_ID, SESSION_ID, pending.id(), "confirmed")).thenReturn(Optional.of(pending));
+        stubVehicleWithOdometer(null);
+        when(garageVehicleRepository.updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, pending.odometerKm()))
+                .thenReturn(Optional.of(pending.odometerKm()));
+        lenient().when(catalogRepository.findFacts(MODEL_ID, 2025)).thenReturn(facts);
+    }
+
+    @Test
+    void confirmingTheProposalSavesTheOdometerAndRecomputesDueStatusWithAssumptions() {
+        var pending = new MotoPendingActionRepository.PendingAction(9L, GARAGE_VEHICLE_ID, 18500.0, "ENGINE_OIL_CHANGE");
+        stubConfirmation(pending, Map.of("ENGINE_OIL_INTERVAL_KM",
+                new dev.repair.api.motorcycle.MotorcycleFactDto("ENGINE_OIL_INTERVAL_KM", 6000.0, null, "km")));
+        when(maintenanceRepository.latestEventByType(GARAGE_VEHICLE_ID)).thenReturn(Map.of(
+                "ENGINE_OIL_CHANGE", new MaintenanceEventDto(
+                        1L, GARAGE_VEHICLE_ID, "ENGINE_OIL_CHANGE", 15000.0, null, null, "manual", OffsetDateTime.now())));
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        verify(garageVehicleRepository).updateOdometerIfOwned(VISITOR_ID, GARAGE_VEHICLE_ID, 18500.0);
+        assertThat(result.actionsTaken()).anyMatch(a -> a.type().equals("odometer_updated") && a.odometerKm() == 18500.0);
+        assertThat(result.answer().summary()).contains("engine oil is ok").contains("2,500 km remaining");
+        assertThat(result.answer().contextUsed()).anyMatch(c -> c.contains("18,500 km"))
+                .anyMatch(c -> c.contains("every 6,000 km")).anyMatch(c -> c.contains("15,000 km"));
+    }
+
+    @Test
+    void confirmingWithAnUnknownIntervalSaysSoInsteadOfInventingOne() {
+        var pending = new MotoPendingActionRepository.PendingAction(9L, GARAGE_VEHICLE_ID, 18500.0, "ENGINE_OIL_CHANGE");
+        stubConfirmation(pending, Map.of());
+        when(maintenanceRepository.latestEventByType(GARAGE_VEHICLE_ID)).thenReturn(Map.of());
+
+        MotoChatTurnResult result = service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        assertThat(result.answer().summary()).contains("don't have a verified engine oil interval").contains("can't say when it is due");
+        assertThat(result.answer().summary()).doesNotContain("remaining");
+    }
+
+    @Test
+    void anAlreadyResolvedOrForeignPendingActionCannotBeConfirmed() {
+        when(pendingActionRepository.resolve(VISITOR_ID, SESSION_ID, 77L, "confirmed")).thenReturn(Optional.empty());
+
+        org.junit.jupiter.api.Assertions.assertThrows(dev.repair.api.common.NotFoundException.class,
+                () -> service.confirmPendingAction(VISITOR_ID, SESSION_ID, 77L));
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
     }
 }

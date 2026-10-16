@@ -15,6 +15,10 @@ public record ProposalAuditEntry(String proposalType, String intent, String verd
         return new ProposalAuditEntry(proposalType, intent, "executed", null);
     }
 
+    static ProposalAuditEntry staged(String proposalType, String intent) {
+        return new ProposalAuditEntry(proposalType, intent, "awaiting_confirmation", null);
+    }
+
     static ProposalAuditEntry rejected(String proposalType, String intent, String reason) {
         return new ProposalAuditEntry(proposalType, intent, "rejected", reason);
     }

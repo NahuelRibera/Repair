@@ -60,7 +60,7 @@ class ChatOrchestrationServiceTest {
 
     @BeforeEach
     void setUp() {
-        chatProperties = new ChatProperties(20, 2000, 6, 900, 1200);
+        chatProperties = new ChatProperties(20, 2000, 6, 900, 1200, 30);
         VariantDetailDto variant = new VariantDetailDto(
                 new VariantDto(VARIANT_ID, MODEL_ID, "BMW 3 Series (E90) 320d 6MT RWD (177 HP)", "slug",
                         2008, 2011, "Diesel", "Rear Wheel Drive", "6-speed manual", "unreviewed"),
@@ -213,7 +213,7 @@ class ChatOrchestrationServiceTest {
     @SuppressWarnings("unchecked")
     void evidenceWordBudgetStopsAddingFurtherChunksOnceExceeded() {
         ChatOrchestrationService tightBudgetService = new ChatOrchestrationService(
-                new ChatProperties(20, 2000, 6, 900, 10), // 10-word evidence budget
+                new ChatProperties(20, 2000, 6, 900, 10, 30), // 10-word evidence budget
                 new OpenAiProperties("sk-test-key", "gpt-4.1-mini", "text-embedding-3-small", 1536, 30, 2),
                 openAiClient, retrievalService, ragRunRepository, sessionRepository, catalogueRepository,
                 JsonMapper.builder().build()

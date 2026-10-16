@@ -8,6 +8,7 @@ public record ChatProperties(
         int maxMessageLength,
         int maxRetrievedChunks,
         int maxOutputTokens,
-        int maxEvidenceWords
+        int maxEvidenceWords,
+        int odometerStaleDays
 ) {
 }

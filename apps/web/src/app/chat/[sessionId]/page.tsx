@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { bikeTitle } from "@/lib/types";
-import type { ActionTaken, MotoChatTurnResult, MotoEvidenceCard, MotoMessage, MotoRagRunDebug, MotoSessionDetail } from "@/lib/types";
+import type { ActionTaken, MotoChatTurnResult, MotoEvidenceCard, MotoMessage, MotoPendingAction, MotoRagRunDebug, MotoSessionDetail } from "@/lib/types";
 import { MotoAnswerCard } from "@/components/MotoAnswerCard";
 import { Composer } from "@/components/Composer";
 import { MotoEvidenceDrawer } from "@/components/MotoEvidenceDrawer";
@@ -14,7 +14,8 @@ import { AssistantAvatar } from "@/components/AssistantAvatar";
 interface TurnExtras {
   evidence: MotoEvidenceCard[];
   actionsTaken: ActionTaken[];
-  debug: MotoRagRunDebug;
+  debug: MotoRagRunDebug | null;
+  pendingActions: MotoPendingAction[];
 }
 
 const EXAMPLE_QUESTIONS = [
@@ -39,6 +40,8 @@ function ConversationView({ sessionId }: { sessionId: number }) {
   const [sendError, setSendError] = useState<string | null>(null);
   const [turnExtras, setTurnExtras] = useState<Record<number, TurnExtras>>({});
   const [drawerFor, setDrawerFor] = useState<number | null>(null);
+  const [resolvedPending, setResolvedPending] = useState<Record<number, "confirmed" | "dismissed">>({});
+  const [resolvingPending, setResolvingPending] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -95,7 +98,7 @@ function ConversationView({ sessionId }: { sessionId: number }) {
       if (currentSessionId !== sessionId) return;
       setTurnExtras((prev) => ({
         ...prev,
-        [result.messageId]: { evidence: result.evidence, actionsTaken: result.actionsTaken, debug: result.debug },
+        [result.messageId]: { evidence: result.evidence, actionsTaken: result.actionsTaken, debug: result.debug, pendingActions: result.pendingActions ?? [] },
       }));
       const fresh = await api.get<MotoSessionDetail>(`/api/moto-sessions/${currentSessionId}`);
       if (currentSessionId === sessionId) setDetail(fresh);
@@ -105,6 +108,36 @@ function ConversationView({ sessionId }: { sessionId: number }) {
       }
     } finally {
       if (currentSessionId === sessionId) setSending(false);
+    }
+  }
+
+  async function resolvePending(action: MotoPendingAction, decision: "confirm" | "dismiss") {
+    const currentSessionId = sessionId;
+    setResolvingPending(action.id);
+    setSendError(null);
+    try {
+      const base = `/api/moto-sessions/${currentSessionId}/pending-actions/${action.id}`;
+      if (decision === "confirm") {
+        const result = await api.post<MotoChatTurnResult>(`${base}/confirm`, {});
+        if (currentSessionId !== sessionId) return;
+        setTurnExtras((prev) => ({
+          ...prev,
+          [result.messageId]: { evidence: [], actionsTaken: result.actionsTaken, debug: null, pendingActions: [] },
+        }));
+        const fresh = await api.get<MotoSessionDetail>(`/api/moto-sessions/${currentSessionId}`);
+        if (currentSessionId === sessionId) setDetail(fresh);
+      } else {
+        await api.post<void>(`${base}/dismiss`, {});
+      }
+      if (currentSessionId === sessionId) {
+        setResolvedPending((prev) => ({ ...prev, [action.id]: decision === "confirm" ? "confirmed" : "dismissed" }));
+      }
+    } catch (e) {
+      if (currentSessionId === sessionId) {
+        setSendError(e instanceof ApiError ? e.message : "Couldn't update that proposal.");
+      }
+    } finally {
+      if (currentSessionId === sessionId) setResolvingPending(null);
     }
   }
 
@@ -174,6 +207,9 @@ function ConversationView({ sessionId }: { sessionId: number }) {
               key={message.id}
               message={message}
               extras={turnExtras[message.id]}
+              resolvedPending={resolvedPending}
+              resolvingPending={resolvingPending}
+              onResolvePending={resolvePending}
               onOpenEvidence={() => setDrawerFor(message.id)}
             />
           ))}
@@ -208,10 +244,16 @@ function ConversationView({ sessionId }: { sessionId: number }) {
 function MessageBubble({
   message,
   extras,
+  resolvedPending,
+  resolvingPending,
+  onResolvePending,
   onOpenEvidence,
 }: {
   message: MotoMessage;
   extras?: TurnExtras;
+  resolvedPending: Record<number, "confirmed" | "dismissed">;
+  resolvingPending: number | null;
+  onResolvePending: (action: MotoPendingAction, decision: "confirm" | "dismiss") => void;
   onOpenEvidence: () => void;
 }) {
   if (message.role === "user") {
@@ -240,6 +282,32 @@ function MessageBubble({
         ) : (
           <p className="text-sm leading-relaxed">{message.content}</p>
         )}
+        {(extras?.pendingActions ?? [])
+          .filter((action) => !resolvedPending[action.id])
+          .map((action) => (
+            <div
+              key={action.id}
+              className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-sm"
+            >
+              <span className="flex-1 min-w-0">{action.summary}. Nothing is saved until you confirm.</span>
+              <button
+                type="button"
+                disabled={resolvingPending === action.id}
+                onClick={() => onResolvePending(action, "confirm")}
+                className="rounded-md bg-accent px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                disabled={resolvingPending === action.id}
+                onClick={() => onResolvePending(action, "dismiss")}
+                className="rounded-md border border-border px-3 py-1 text-xs font-medium disabled:opacity-50"
+              >
+                Dismiss
+              </button>
+            </div>
+          ))}
       </div>
     </div>
   );

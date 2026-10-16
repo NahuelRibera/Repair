@@ -99,6 +99,7 @@ public class GarageVehicleRepository {
                         UPDATE garage_vehicles
                         SET nickname = COALESCE(:nickname, nickname),
                             current_odometer_km = COALESCE(:odometer, current_odometer_km),
+                            odometer_updated_at = CASE WHEN :odometer IS NULL THEN odometer_updated_at ELSE now() END,
                             updated_at = now()
                         WHERE id = :id AND user_id = :userId AND deleted_at IS NULL
                         """)
@@ -127,7 +128,7 @@ public class GarageVehicleRepository {
         return jdbcClient.sql(
                         """
                         UPDATE garage_vehicles
-                        SET current_odometer_km = :odometer, updated_at = now()
+                        SET current_odometer_km = :odometer, odometer_updated_at = now(), updated_at = now()
                         WHERE id = :id AND user_id = :userId AND deleted_at IS NULL
                         RETURNING current_odometer_km
                         """)
@@ -135,6 +136,20 @@ public class GarageVehicleRepository {
                 .param("id", id)
                 .param("userId", userId)
                 .query(Double.class)
+                .optional();
+    }
+
+    /** When the stored odometer value was last written; empty when no
+     * odometer is stored or the vehicle is not owned by this user. */
+    public Optional<java.time.OffsetDateTime> findOdometerUpdatedAt(long userId, long id) {
+        return jdbcClient.sql(
+                        """
+                        SELECT odometer_updated_at FROM garage_vehicles
+                        WHERE id = :id AND user_id = :userId AND deleted_at IS NULL AND odometer_updated_at IS NOT NULL
+                        """)
+                .param("id", id)
+                .param("userId", userId)
+                .query(java.time.OffsetDateTime.class)
                 .optional();
     }
 
@@ -154,7 +169,7 @@ public class GarageVehicleRepository {
      * migration's header comment — so this is the one place that graph
      * has to be walked child-first by hand):
      * moto_retrieved_evidence -> moto_rag_runs -> moto_chat_messages ->
-     * moto_chat_sessions -> {maintenance_events, vehicle_preferences} ->
+     * moto_pending_actions -> moto_chat_sessions -> {maintenance_events, vehicle_preferences} ->
      * garage_vehicles. Never touches app_users, the motorcycle catalog,
      * the knowledge base, or any other user's rows (every DELETE below
      * is itself scoped to this one garage_vehicle_id, and the whole
@@ -179,6 +194,7 @@ public class GarageVehicleRepository {
                         WHERE session_id IN (SELECT id FROM moto_chat_sessions WHERE garage_vehicle_id = :id)
                         """)
                 .param("id", id).update();
+        jdbcClient.sql("DELETE FROM moto_pending_actions WHERE garage_vehicle_id = :id").param("id", id).update();
         jdbcClient.sql("DELETE FROM moto_chat_sessions WHERE garage_vehicle_id = :id").param("id", id).update();
         jdbcClient.sql("DELETE FROM maintenance_events WHERE garage_vehicle_id = :id").param("id", id).update();
         jdbcClient.sql("DELETE FROM vehicle_preferences WHERE garage_vehicle_id = :id").param("id", id).update();
