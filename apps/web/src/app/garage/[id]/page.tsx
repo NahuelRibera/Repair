@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { bikeTitle, SERVICE_TYPE_LABELS } from "@/lib/types";
 import type {
@@ -12,6 +12,7 @@ import type {
   MaintenanceStatusCard,
   MotoSessionDetail,
 } from "@/lib/types";
+import { ErrorState, LoadingState } from "@/components/PageState";
 
 const STATUS_STYLES: Record<MaintenanceStatus, { label: string; className: string }> = {
   OK: { label: "OK", className: "bg-green-50 text-green-700 border-green-200" },
@@ -146,26 +147,26 @@ export default function GarageVehiclePage() {
 
   if (loadError) {
     return (
-      <div className="flex-1 flex items-center justify-center p-6 text-center">
-        <p className="text-sm text-muted">{loadError}</p>
-      </div>
+      <ErrorState
+        message={loadError}
+        onRetry={() => {
+          setLoadError(null);
+          refresh();
+        }}
+      />
     );
   }
 
   if (!vehicle || !dashboard || !history) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-muted">Loading…</p>
-      </div>
-    );
+    return <LoadingState label="Loading your bike…" />;
   }
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10">
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl font-bold">{vehicle.nickname || bikeTitle(vehicle)}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold break-words">{vehicle.nickname || bikeTitle(vehicle)}</h1>
             <p className="text-muted">
               {bikeTitle(vehicle)} · {vehicle.year}
             </p>
@@ -180,16 +181,17 @@ export default function GarageVehiclePage() {
           </button>
         </div>
 
-        <div className="rounded-xl border border-border bg-panel p-5 mb-6">
-          <label className="block text-xs font-medium text-muted mb-1.5">Current odometer (km)</label>
+        <div className="rounded-xl border border-border bg-panel p-5 mb-6" aria-live="polite">
+          <label htmlFor="odometer" className="block text-xs font-medium text-muted mb-1.5">Current odometer (km)</label>
           <div className="flex gap-2">
             <input
+              id="odometer"
               type="number"
               min={0}
               value={odometerDraft}
               onChange={(e) => setOdometerDraft(e.target.value)}
               placeholder="Not recorded"
-              className="flex-1 rounded-lg border border-border bg-panel px-3 py-2 text-sm"
+              className="min-w-0 flex-1 rounded-lg border border-border bg-panel px-3 py-2 text-sm"
             />
             <button
               type="button"
@@ -229,6 +231,7 @@ export default function GarageVehiclePage() {
           <button
             type="button"
             onClick={() => setShowAddEvent((v) => !v)}
+            aria-expanded={showAddEvent}
             className="text-sm font-medium text-accent hover:underline"
           >
             {showAddEvent ? "Cancel" : "+ Record maintenance"}
@@ -246,7 +249,9 @@ export default function GarageVehiclePage() {
         )}
 
         {history.length === 0 ? (
-          <p className="text-sm text-muted">No maintenance recorded yet.</p>
+          <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
+            No maintenance recorded yet. Use &ldquo;+ Record maintenance&rdquo; to add your first service.
+          </p>
         ) : (
           <ul className="space-y-2">
             {history.map((event) =>
@@ -279,11 +284,11 @@ export default function GarageVehiclePage() {
                     </span>
                   </div>
                   {confirmDeleteId === event.id ? (
-                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
+                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3" role="group" aria-label="Confirm deletion">
                       <p className="text-sm text-red-700">
                         Delete this record? This changes your maintenance status and can&apos;t be undone.
                       </p>
-                      {deleteError && <p className="mt-1 text-sm text-red-700">{deleteError}</p>}
+                      {deleteError && <p role="alert" className="mt-1 text-sm text-red-700">{deleteError}</p>}
                       <div className="mt-2 flex gap-2">
                         <button
                           type="button"
@@ -313,7 +318,8 @@ export default function GarageVehiclePage() {
                           setEditingId(event.id);
                           setConfirmDeleteId(null);
                         }}
-                        className="py-1 text-sm font-medium text-accent hover:underline"
+                        aria-label={`Edit ${SERVICE_TYPE_LABELS[event.serviceType]} record`}
+                        className="py-2 text-sm font-medium text-accent hover:underline"
                       >
                         Edit
                       </button>
@@ -323,7 +329,8 @@ export default function GarageVehiclePage() {
                           setConfirmDeleteId(event.id);
                           setDeleteError(null);
                         }}
-                        className="py-1 text-sm font-medium text-red-700 hover:underline"
+                        aria-label={`Delete ${SERVICE_TYPE_LABELS[event.serviceType]} record`}
+                        className="py-2 text-sm font-medium text-red-700 hover:underline"
                       >
                         Delete
                       </button>
@@ -438,6 +445,7 @@ function MaintenanceForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offeredOdometerKm, setOfferedOdometerKm] = useState<number | null>(null);
+  const uid = useId();
 
   async function submit(updateOdometer = false) {
     if (!odometerKm && !performedAt) {
@@ -490,8 +498,9 @@ function MaintenanceForm({
         </div>
       )}
       <div>
-        <label className="block text-xs font-medium text-muted mb-1">Service type</label>
+        <label htmlFor={`${uid}-type`} className="block text-xs font-medium text-muted mb-1">Service type</label>
         <select
+          id={`${uid}-type`}
           value={serviceType}
           onChange={(e) => setServiceType(e.target.value as MaintenanceServiceType)}
           className="w-full rounded-lg border border-border bg-panel px-3 py-2 text-sm"
@@ -503,10 +512,11 @@ function MaintenanceForm({
           ))}
         </select>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-muted mb-1">Odometer (km)</label>
+          <label htmlFor={`${uid}-km`} className="block text-xs font-medium text-muted mb-1">Odometer (km)</label>
           <input
+            id={`${uid}-km`}
             type="number"
             min={0}
             value={odometerKm}
@@ -515,8 +525,9 @@ function MaintenanceForm({
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-muted mb-1">Date</label>
+          <label htmlFor={`${uid}-date`} className="block text-xs font-medium text-muted mb-1">Date</label>
           <input
+            id={`${uid}-date`}
             type="date"
             value={performedAt}
             onChange={(e) => setPerformedAt(e.target.value)}
@@ -525,8 +536,9 @@ function MaintenanceForm({
         </div>
       </div>
       <div>
-        <label className="block text-xs font-medium text-muted mb-1">Notes (optional)</label>
+        <label htmlFor={`${uid}-notes`} className="block text-xs font-medium text-muted mb-1">Notes (optional)</label>
         <input
+          id={`${uid}-notes`}
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
