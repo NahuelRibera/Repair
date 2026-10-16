@@ -342,12 +342,22 @@ export interface ActionTaken {
   detail: string | null;
 }
 
+// A write the assistant proposed that is only stored after the rider confirms it.
+export interface MotoPendingAction {
+  id: number;
+  type: string;
+  odometerKm: number;
+  serviceType: MaintenanceServiceType | null;
+  summary: string;
+}
+
 export interface MotoChatTurnResult {
   messageId: number;
   answer: MotoDiagnosticAnswer;
   evidence: MotoEvidenceCard[];
   actionsTaken: ActionTaken[];
-  debug: MotoRagRunDebug;
+  debug: MotoRagRunDebug | null;
+  pendingActions: MotoPendingAction[];
 }
 
 // ---- Authenticated Repair user (Google OAuth only) ----
