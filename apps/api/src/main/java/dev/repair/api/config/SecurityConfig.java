@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
@@ -64,11 +65,20 @@ public class SecurityConfig {
                         // conversations) requires a real authenticated Repair user.
                         .requestMatchers("/api/garage/**", "/api/moto-sessions/**", "/api/moto-rag-runs/**").authenticated()
                         .requestMatchers("/api/me", "/api/me/**").authenticated()
-                        // The dynamic motorcycle catalog stays public (the landing
-                        // bike picker must work before sign-in), as does the car
-                        // prototype (preserved, unchanged, anonymous-cookie-based)
-                        // and the login/logout endpoints themselves.
-                        .anyRequest().permitAll()
+                        // Explicit public allowlist. Everything not listed here
+                        // (including endpoints added later) requires authentication.
+                        // Login/logout and the OAuth2 dance itself:
+                        .requestMatchers("/api/auth/login", "/api/auth/logout", "/api/auth/dev-login",
+                                "/api/oauth2/authorization/**", "/api/login/oauth2/code/**").permitAll()
+                        // Dynamic motorcycle catalog (landing bike picker works before sign-in):
+                        .requestMatchers(HttpMethod.GET, "/api/motorcycles/**").permitAll()
+                        // Preserved car prototype (anonymous-cookie based, unchanged):
+                        .requestMatchers("/api/manufacturers/**", "/api/models/**", "/api/variants/**",
+                                "/api/vehicles/**", "/api/sessions/**", "/api/rag-runs/**",
+                                "/api/data-quality/**").permitAll()
+                        // Health probe and the servlet error dispatch (keeps 404/500 bodies intact):
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
+                        .anyRequest().denyAll()
                 )
                 .oauth2Login(oauth2 -> oauth2
                         .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
