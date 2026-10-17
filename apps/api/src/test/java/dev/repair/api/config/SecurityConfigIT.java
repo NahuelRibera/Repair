@@ -98,4 +98,35 @@ class SecurityConfigIT {
                 .andExpect(status().is3xxRedirection())
                 .andExpect(header().string("Location", startsWith("/api/oauth2/authorization/google")));
     }
+
+    @Test
+    void anUnlistedEndpointIsDeniedToAnonymousUsers() throws Exception {
+        mockMvc.perform(get("/api/some-future-endpoint")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/actuator/env")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void anUnlistedMutatingEndpointIsDeniedWithoutCsrf() throws Exception {
+        mockMvc.perform(post("/api/some-future-endpoint")).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void everyAnonymousEndpointUsedByTheWebAppStaysPublic() throws Exception {
+        for (String path : new String[] {
+            "/api/motorcycles/manufacturers",
+            "/api/manufacturers",
+            "/api/vehicles/demo",
+            "/api/vehicles/covered",
+            "/api/data-quality/summary",
+            "/api/sessions",
+            "/actuator/health",
+        }) {
+            mockMvc.perform(get(path)).andExpect(result -> {
+                int code = result.getResponse().getStatus();
+                if (code == 401 || code == 403) {
+                    throw new AssertionError(path + " must be public but returned " + code);
+                }
+            });
+        }
+    }
 }
