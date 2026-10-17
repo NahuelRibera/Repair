@@ -7,16 +7,29 @@ import { bikeTitle } from "@/lib/types";
 import type { GarageVehicle } from "@/lib/types";
 import { BikePicker } from "@/components/BikePicker";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ErrorState, LoadingState } from "@/components/PageState";
 
 export default function GaragePage() {
   const [garage, setGarage] = useState<GarageVehicle[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [addingBike, setAddingBike] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function refresh() {
-    api.get<GarageVehicle[]>("/api/garage/vehicles").then(setGarage);
+    api.get<GarageVehicle[]>("/api/garage/vehicles").then(
+      (vehicles) => {
+        setLoadError(false);
+        setGarage(vehicles);
+      },
+      () => setLoadError(true),
+    );
+  }
+
+  function retry() {
+    setLoadError(false);
+    refresh();
   }
 
   useEffect(refresh, []);
@@ -54,10 +67,10 @@ export default function GaragePage() {
   }
 
   if (garage === null) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-sm text-muted">Loading your garage…</p>
-      </div>
+    return loadError ? (
+      <ErrorState message="Couldn't load your garage." onRetry={retry} />
+    ) : (
+      <LoadingState label="Loading your garage…" />
     );
   }
 
@@ -66,6 +79,15 @@ export default function GaragePage() {
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10">
         <h1 className="text-2xl font-bold mb-1">My Garage</h1>
         <p className="text-muted mb-8">Your motorcycles, their maintenance history, and what&apos;s due next.</p>
+
+        {loadError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 mb-4 text-sm text-red-700" role="alert">
+            <p>Couldn&apos;t refresh your garage.</p>
+            <button type="button" onClick={retry} className="mt-1 font-medium underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+              Try again
+            </button>
+          </div>
+        )}
 
         {garage.length === 0 && !addingBike && (
           <div className="rounded-xl border border-dashed border-border p-8 text-center mb-6">
@@ -81,12 +103,12 @@ export default function GaragePage() {
         )}
 
         {garage.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6" aria-label="Your motorcycles">
             {garage.map((vehicle) => (
-              <div key={vehicle.id} className="group relative">
+              <li key={vehicle.id} className="group relative min-w-0">
                 <Link
                   href={`/garage/${vehicle.id}`}
-                  className="block rounded-xl border border-border bg-panel p-5 pr-10 hover:border-accent/40 hover:bg-accent/5 transition-colors"
+                  className="block rounded-xl border border-border bg-panel p-5 pr-10 break-words hover:border-accent/40 hover:bg-accent/5 transition-colors"
                 >
                   <p className="font-semibold mb-0.5">{vehicle.nickname || bikeTitle(vehicle)}</p>
                   <p className="text-sm text-muted mb-3">
@@ -106,25 +128,25 @@ export default function GaragePage() {
                     e.stopPropagation();
                     setPendingDeleteId(vehicle.id);
                   }}
-                  className="absolute right-2.5 top-2.5 rounded-md p-1 text-muted/60 opacity-0 group-hover:opacity-100 hover:bg-black/5 hover:text-red-600 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent transition-opacity"
+                  className="absolute right-1.5 top-1.5 rounded-md p-2.5 text-muted/60 sm:opacity-0 group-hover:opacity-100 hover:bg-black/5 hover:text-red-600 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent transition-opacity"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
                 </button>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
 
-        {error && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 mb-4 text-sm text-red-700">{error}</div>}
-        {deleteError && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 mb-4 text-sm text-red-700">{deleteError}</div>}
+        {error && <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 mb-4 text-sm text-red-700">{error}</div>}
+        {deleteError && <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 mb-4 text-sm text-red-700">{deleteError}</div>}
 
         {garage.length > 0 && !addingBike && (
           <button
             type="button"
             onClick={() => setAddingBike(true)}
-            className="w-full rounded-lg border border-dashed border-border px-4 py-3.5 text-sm font-medium text-muted hover:border-accent/40 hover:text-accent transition-colors"
+            className="w-full rounded-lg border border-dashed focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent border-border px-4 py-3.5 text-sm font-medium text-muted hover:border-accent/40 hover:text-accent transition-colors"
           >
             + Add another bike
           </button>
@@ -132,7 +154,7 @@ export default function GaragePage() {
 
         {addingBike && (
           <div className="rounded-xl border border-border bg-panel p-5">
-            <p className="font-semibold mb-3">Add a motorcycle</p>
+            <h2 className="font-semibold mb-3">Add a motorcycle</h2>
             <BikePicker onSelected={addBike} submitLabel="Add to my garage" />
             <button
               type="button"
