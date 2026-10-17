@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import dev.repair.api.TestcontainersConfiguration;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -67,6 +68,23 @@ class SecurityConfigIT {
     void aMutatingRequestWithoutTheCsrfHeaderIsRejected() throws Exception {
         mockMvc.perform(post("/api/moto-sessions").contentType("application/json").content("{}"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aMutatingRequestEchoingTheCsrfCookieInTheHeaderPassesCsrfAndFailsOnlyAuthentication() throws Exception {
+        String token = mockMvc.perform(get("/api/motorcycles/manufacturers"))
+                .andExpect(cookie().exists("XSRF-TOKEN"))
+                .andReturn()
+                .getResponse()
+                .getCookie("XSRF-TOKEN")
+                .getValue();
+
+        mockMvc.perform(post("/api/moto-sessions")
+                        .cookie(new Cookie("XSRF-TOKEN", token))
+                        .header("X-XSRF-TOKEN", token)
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
