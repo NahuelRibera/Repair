@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import NamedTuple
 
 
 @dataclass(frozen=True)
@@ -24,8 +25,38 @@ class Fact:
     raw_source_text: str
 
 
-def _num(text: str) -> float:
-    return float(text.replace(",", ""))
+class Quantity(NamedTuple):
+    value: float
+    unit: str
+
+
+# Source unit spelling (lower-cased) -> (canonical unit, multiplier). The
+# only conversion allowed is years -> months, because that is an exact
+# calendar identity; nothing else is ever converted between units.
+_UNIT_TABLE: dict[str, tuple[str, int]] = {
+    "km": ("km", 1),
+    "mm": ("mm", 1),
+    "l": ("L", 1),
+    "kpa": ("kPa", 1),
+    "nm": ("N·m", 1),
+    "month": ("months", 1),
+    "months": ("months", 1),
+    "year": ("months", 12),
+    "years": ("months", 12),
+}
+
+
+def normalize_quantity(number: str, source_unit: str) -> Quantity:
+    """The single place where an extracted number and its unit become a
+    canonical value: thousands separators are stripped and the unit is
+    mapped to the unit stored on the fact (years become months). Raises
+    ValueError for an unknown unit or an unparsable number.
+    """
+    try:
+        unit, factor = _UNIT_TABLE[source_unit.strip().lower()]
+    except KeyError:
+        raise ValueError(f"unknown unit: {source_unit!r}") from None
+    return Quantity(float(number.replace(",", "")) * factor, unit)
 
 
 def _section(body: str, heading_pattern: str) -> str | None:
@@ -87,7 +118,7 @@ def _extract_torque_table(body: str) -> list[Fact]:
         m = re.search(r"([\d.]+)\s*N", value)
         if not m:
             continue
-        facts.append(Fact(fact_type, float(m.group(1)), None, "N·m", f"{name} | {value}"))
+        facts.append(Fact(fact_type, normalize_quantity(m.group(1), "Nm").value, None, "N·m", f"{name} | {value}"))
     return facts
 
 
@@ -113,7 +144,7 @@ def _extract_regex_fact(
             elif fact_type == "SPARK_PLUG_GAP_MM":
                 value_text = value_text.replace("–", "-").replace("—", "-")
             return Fact(fact_type, None, value_text, unit, raw)
-        return Fact(fact_type, _num(m.group(1)), None, unit, raw)
+        return Fact(fact_type, normalize_quantity(m.group(1), unit).value, None, unit, raw)
     return None
 
 
@@ -149,10 +180,10 @@ def _months_from_explicit_interval(value: str) -> float | None:
     """Parse an explicitly stated recurring year/month interval as months."""
     m = re.search(r"(\d+)\s*years?\b", value, re.IGNORECASE)
     if m:
-        return float(int(m.group(1)) * 12)
+        return normalize_quantity(m.group(1), "years").value
     m = re.search(r"(\d+)\s*[- ]?\s*months?\b", value, re.IGNORECASE)
     if m:
-        return float(m.group(1))
+        return normalize_quantity(m.group(1), "months").value
     return None
 
 
@@ -189,7 +220,7 @@ def _extract_canonical_maintenance_facts(body: str) -> list[Fact]:
             if len(km_values) == 1:
                 km = re.search(r"([\d,]+)\s*km\b", recurring, re.IGNORECASE)
         if km:
-            facts.append(Fact("ENGINE_OIL_INTERVAL_KM", _num(km.group(1)), None, "km", raw))
+            facts.append(Fact("ENGINE_OIL_INTERVAL_KM", normalize_quantity(km.group(1), "km").value, None, "km", raw))
         months = _months_from_explicit_interval(recurring)
         if months is not None:
             facts.append(Fact("ENGINE_OIL_INTERVAL_MONTHS", months, None, "months", raw))
@@ -199,14 +230,14 @@ def _extract_canonical_maintenance_facts(body: str) -> list[Fact]:
         value, raw = item
         m = re.search(r"([\d,]+)\s*km\b", value, re.IGNORECASE)
         if m:
-            facts.append(Fact("VALVE_CLEARANCE_INTERVAL_KM", _num(m.group(1)), None, "km", raw))
+            facts.append(Fact("VALVE_CLEARANCE_INTERVAL_KM", normalize_quantity(m.group(1), "km").value, None, "km", raw))
 
     item = _canonical_bullet(section, r"Air[- ]filter replacement")
     if item:
         value, raw = item
         m = re.search(r"([\d,]+)\s*km\b", value, re.IGNORECASE)
         if m:
-            facts.append(Fact("AIR_FILTER_INTERVAL_KM", _num(m.group(1)), None, "km", raw))
+            facts.append(Fact("AIR_FILTER_INTERVAL_KM", normalize_quantity(m.group(1), "km").value, None, "km", raw))
 
     item = _canonical_bullet(section, r"Brake fluid")
     if item:
@@ -227,7 +258,7 @@ def _extract_canonical_maintenance_facts(body: str) -> list[Fact]:
         value, raw = item
         m = re.search(r"([\d,]+)\s*km\b", value, re.IGNORECASE)
         if m:
-            facts.append(Fact("CHAIN_LUBE_INTERVAL_KM", _num(m.group(1)), None, "km", raw))
+            facts.append(Fact("CHAIN_LUBE_INTERVAL_KM", normalize_quantity(m.group(1), "km").value, None, "km", raw))
             facts.append(Fact("CHAIN_LUBE_INTERVAL", None, value, None, raw))
 
     return facts
@@ -434,14 +465,14 @@ def _extract_spark_plug_interval(body: str) -> list[Fact]:
     )
     if simple:
         return [
-            Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", _num(simple.group(1)), None, "km", simple.group(0).strip()),
-            Fact("SPARK_PLUG_REPLACE_INTERVAL_MONTHS", float(simple.group(2)), None, "months", simple.group(0).strip()),
+            Fact("SPARK_PLUG_REPLACE_INTERVAL_KM", normalize_quantity(simple.group(1), "km").value, None, "km", simple.group(0).strip()),
+            Fact("SPARK_PLUG_REPLACE_INTERVAL_MONTHS", normalize_quantity(simple.group(2), "months").value, None, "months", simple.group(0).strip()),
         ]
 
     two_point = re.search(r"Replace at\s*([\d,]+)\s*and\s*([\d,]+)\s*km", section, re.IGNORECASE)
     if two_point:
-        first_km = _num(two_point.group(1))
-        second_km = _num(two_point.group(2))
+        first_km = normalize_quantity(two_point.group(1), "km").value
+        second_km = normalize_quantity(two_point.group(2), "km").value
         if second_km > first_km:
             raw = two_point.group(0).strip()
             return [
@@ -478,7 +509,11 @@ def _extract_oil_filter_interval(body: str) -> list[Fact]:
     if not match:
         return []
     first_km, second_km, second_months, third_km, third_months = (
-        _num(match.group(1)), _num(match.group(2)), int(match.group(3)), _num(match.group(4)), int(match.group(5))
+        normalize_quantity(match.group(1), "km").value,
+        normalize_quantity(match.group(2), "km").value,
+        normalize_quantity(match.group(3), "months").value,
+        normalize_quantity(match.group(4), "km").value,
+        normalize_quantity(match.group(5), "months").value,
     )
     raw = match.group(0).strip()
     facts: list[Fact] = []
@@ -488,7 +523,7 @@ def _extract_oil_filter_interval(body: str) -> list[Fact]:
             facts.append(Fact("OIL_FILTER_INITIAL_POINT_KM", first_km, None, "km", raw))
         facts.append(Fact("OIL_FILTER_SCHEDULE_START_KM", second_km, None, "km", raw))
     if third_months > second_months:
-        facts.append(Fact("OIL_FILTER_INTERVAL_MONTHS", float(third_months - second_months), None, "months", raw))
+        facts.append(Fact("OIL_FILTER_INTERVAL_MONTHS", third_months - second_months, None, "months", raw))
     return facts
 
 
@@ -538,8 +573,7 @@ def _extract_year_intervals_as_months(body: str) -> list[Fact]:
             m = re.search(pattern, section, re.IGNORECASE)
             if not m:
                 continue
-            value = int(m.group(1))
-            months = value * 12 if captured_unit == "years" else value
-            facts.append(Fact(fact_type, float(months), None, "months", m.group(0).strip()))
+            months = normalize_quantity(m.group(1), captured_unit)
+            facts.append(Fact(fact_type, months.value, None, months.unit, m.group(0).strip()))
             break
     return facts
