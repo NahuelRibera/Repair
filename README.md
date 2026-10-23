@@ -49,6 +49,8 @@ Asking whether a service is due depends on information the model cannot know on 
 
 For maintenance-due questions the API treats an odometer that is missing, or older than `CHAT_ODOMETER_STALE_DAYS` days (default 30), as unreliable and asks for the current reading. The rider's reply is shown as a proposed odometer update with Confirm and Dismiss buttons and nothing is stored until Confirm is pressed (`POST /api/moto-sessions/{id}/pending-actions/{actionId}/confirm`). After confirmation the answer is recomputed from the stored interval and service history and lists the assumptions it used. An unknown interval is reported as unknown. Hypothetical mileage never produces a proposal. Odometer readings that do not answer this request are still written directly as before.
 
+Chat messages longer than `CHAT_MAX_MESSAGE_LENGTH` characters (default 2000) are rejected with HTTP 400 and `{"error": "Message is too long (max N characters)"}` before any retrieval, embedding or model call; a message of exactly that length is processed normally.
+
 ![Repair asking for the current odometer and last oil change before answering whether an oil service is due](docs/screenshots/clarification.png)
 <p align="center"><em>When required context is missing, Repair asks for the rider's maintenance history instead of guessing.</em></p>
 
