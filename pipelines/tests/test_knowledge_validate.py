@@ -115,6 +115,32 @@ def test_duplicate_and_overlapping_entries(tmp_path):
     assert "entry-duplicate" in rules(found) and "entry-overlap" in rules(found)
 
 
+def test_overlap_message_names_both_files(tmp_path):
+    first = write(tmp_path, doc(2018, 2021), year="2018")
+    second = write(tmp_path, doc(2020, 2022), year="2020")
+    (finding,) = [f for f in validate_paths([tmp_path]) if f.rule.startswith("entry-")]
+    assert (finding.rule, finding.severity) == ("entry-overlap", "error")
+    assert finding.file.endswith(f"test-bike/{second.name}")
+    assert f"test-bike/{first.name}" in finding.message
+
+
+def test_duplicate_message_names_both_files(tmp_path):
+    first = write(tmp_path, doc(2020), year="2020")
+    copy = write(tmp_path, doc(2020), name="2020-copy.md")
+    found = [f for f in validate_paths([tmp_path]) if f.rule.startswith("entry-")]
+    assert [(f.rule, f.severity) for f in found] == [("entry-duplicate", "error")]
+    names = {first.name, copy.name}
+    assert {n for n in names if found[0].file.endswith(n)} | {n for n in names if n in found[0].message} == names
+
+
+def test_adjacent_ranges_and_other_markets_are_not_flagged(tmp_path):
+    write(tmp_path, doc(2018, 2019), year="2018")
+    write(tmp_path, doc(2020, 2021), year="2020")
+    write(tmp_path, doc(2018, 2021).replace("market: EU", "market: US"), name="2018-us.md")
+    found = [f for f in validate_paths([tmp_path]) if f.rule.startswith("entry-")]
+    assert found == []
+
+
 def test_other_market_or_variant_is_not_a_duplicate(tmp_path):
     write(tmp_path, doc(2020), year="2020")
     write(tmp_path, doc(2020, extra="variant: ABS\n"), name="2020-abs.md")
