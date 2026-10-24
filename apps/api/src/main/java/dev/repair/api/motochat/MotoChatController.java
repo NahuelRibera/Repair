@@ -23,11 +23,14 @@ public class MotoChatController {
     private final MotoRagRunRepository ragRunRepository;
     private final ChatProperties chatProperties;
     private final AuthenticatedUserContext currentUser;
+    private final ChatRateLimiter rateLimiter;
 
     public MotoChatController(
             MotoChatSessionRepository sessionRepository, MotoChatOrchestrationService orchestrationService,
-            MotoRagRunRepository ragRunRepository, ChatProperties chatProperties, AuthenticatedUserContext currentUser
+            MotoRagRunRepository ragRunRepository, ChatProperties chatProperties, AuthenticatedUserContext currentUser,
+            ChatRateLimiter rateLimiter
     ) {
+        this.rateLimiter = rateLimiter;
         this.sessionRepository = sessionRepository;
         this.orchestrationService = orchestrationService;
         this.ragRunRepository = ragRunRepository;
@@ -37,6 +40,7 @@ public class MotoChatController {
 
     @PostMapping("/api/moto-sessions/{sessionId}/messages")
     public MotoChatTurnResult sendMessage(@PathVariable long sessionId, @Valid @RequestBody MotoSendMessageRequest request) {
+        rateLimiter.acquire(currentUser.getUserId());
         Long garageVehicleId = sessionRepository.findGarageVehicleIdForSession(currentUser.getUserId(), sessionId)
                 .orElseThrow(() -> new NotFoundException("Conversation not found"));
         if (request.content().length() > chatProperties.maxMessageLength()) {
@@ -47,6 +51,7 @@ public class MotoChatController {
 
     @PostMapping("/api/moto-sessions/{sessionId}/pending-actions/{actionId}/confirm")
     public MotoChatTurnResult confirmPendingAction(@PathVariable long sessionId, @PathVariable long actionId) {
+        rateLimiter.acquire(currentUser.getUserId());
         requireOwnedSession(sessionId);
         return orchestrationService.confirmPendingAction(currentUser.getUserId(), sessionId, actionId);
     }

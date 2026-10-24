@@ -11,6 +11,8 @@ import dev.repair.api.auth.AuthenticatedUserContext;
 import dev.repair.api.common.ApiExceptionHandler;
 import dev.repair.api.common.NotFoundException;
 import dev.repair.api.config.ChatProperties;
+import dev.repair.api.config.ChatRateLimitProperties;
+import java.time.Clock;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,7 +35,8 @@ class MotoPendingActionEndpointTest {
         when(user.getUserId()).thenReturn(1L);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new MotoChatController(sessions, orchestration,
-                        mock(MotoRagRunRepository.class), new ChatProperties(10, 2000, 5, 500, 100, 30, 30), user))
+                        mock(MotoRagRunRepository.class), new ChatProperties(10, 2000, 5, 500, 100, 30, 30), user,
+                        new ChatRateLimiter(new ChatRateLimitProperties(100, 60), Clock.systemUTC())))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
