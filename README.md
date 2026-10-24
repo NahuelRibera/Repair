@@ -51,6 +51,8 @@ For maintenance-due questions the API treats an odometer that is missing, or old
 
 Chat messages longer than `CHAT_MAX_MESSAGE_LENGTH` characters (default 2000) are rejected with HTTP 400 and `{"error": "Message is too long (max N characters)"}` before any retrieval, embedding or model call; a message of exactly that length is processed normally.
 
+Message sends and pending-action confirmations are rate limited per authenticated user with an in-memory sliding window (single instance only). Beyond `CHAT_RATE_LIMIT_MAX_REQUESTS` requests (default 20) within `CHAT_RATE_LIMIT_WINDOW_SECONDS` seconds (default 60) the API returns HTTP 429 with a `Retry-After` header and `{"error": ...}`; other users are unaffected and requests resume once the window has passed.
+
 ![Repair asking for the current odometer and last oil change before answering whether an oil service is due](docs/screenshots/clarification.png)
 <p align="center"><em>When required context is missing, Repair asks for the rider's maintenance history instead of guessing.</em></p>
 

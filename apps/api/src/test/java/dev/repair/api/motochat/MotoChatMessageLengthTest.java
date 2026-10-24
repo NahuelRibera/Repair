@@ -41,7 +41,8 @@ class MotoChatMessageLengthTest {
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new MotoChatController(sessions, orchestration, mock(MotoRagRunRepository.class), properties, user))
+                .standaloneSetup(new MotoChatController(sessions, orchestration, mock(MotoRagRunRepository.class), properties, user,
+                        new ChatRateLimiter(new dev.repair.api.config.ChatRateLimitProperties(100, 60))))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .setValidator(validator)
                 .build();
