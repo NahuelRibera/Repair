@@ -109,6 +109,39 @@ class MotoPendingActionIT {
         assertThat(status(actionId)).isEqualTo("confirmed");
     }
 
+    private void backdate(long actionId, int minutes) {
+        jdbcClient.sql("UPDATE moto_pending_actions SET created_at = now() - make_interval(mins => :m) WHERE id = :id")
+                .param("m", minutes).param("id", actionId).update();
+    }
+
+    @Test
+    void confirmingAStaleProposalMarksItExpiredAndWritesNothing() {
+        long actionId = pendingActionRepository.createOdometerUpdate(owner, session, vehicle, 18500.0, null);
+        backdate(actionId, 31);
+
+        assertThatThrownBy(() -> orchestrationService.confirmPendingAction(owner, session, actionId))
+                .isInstanceOf(PendingActionExpiredException.class);
+
+        assertThat(status(actionId)).isEqualTo("expired");
+        assertThat(storedOdometer()).isNull();
+        assertThat(pendingActionRepository.resolve(owner, session, actionId, "confirmed")).isEmpty();
+    }
+
+    @Test
+    void aRecentProposalStillConfirmsAndAStaleOneCanNoLongerBeDismissed() {
+        long recent = pendingActionRepository.createOdometerUpdate(owner, session, vehicle, 18500.0, null);
+        backdate(recent, 29);
+        orchestrationService.confirmPendingAction(owner, session, recent);
+        assertThat(status(recent)).isEqualTo("confirmed");
+
+        long stale = pendingActionRepository.createOdometerUpdate(owner, session, vehicle, 19000.0, null);
+        backdate(stale, 31);
+        assertThatThrownBy(() -> orchestrationService.confirmPendingAction(owner, session, stale))
+                .isInstanceOf(PendingActionExpiredException.class);
+        assertThatThrownBy(() -> orchestrationService.dismissPendingAction(owner, session, stale))
+                .isInstanceOf(dev.repair.api.common.NotFoundException.class);
+    }
+
     @Test
     void confirmingBelowTheServiceHistoryMarksTheActionFailedAndWritesNothing() {
         maintenanceRepository.createEvent(vehicle, "ENGINE_OIL_CHANGE", 15000.0, null, null, "manual");

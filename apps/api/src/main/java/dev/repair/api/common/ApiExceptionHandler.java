@@ -1,6 +1,7 @@
 package dev.repair.api.common;
 
 import dev.repair.api.garage.OdometerConflictException;
+import dev.repair.api.motochat.PendingActionExpiredException;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<Map<String, String>> handleNotFound(NotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PendingActionExpiredException.class)
+    public ResponseEntity<Map<String, String>> handlePendingActionExpired(PendingActionExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", ex.getMessage(), "code", PendingActionExpiredException.CODE));
     }
 
     @ExceptionHandler(BadRequestException.class)
