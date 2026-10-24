@@ -40,7 +40,7 @@ function ConversationView({ sessionId }: { sessionId: number }) {
   const [sendError, setSendError] = useState<string | null>(null);
   const [turnExtras, setTurnExtras] = useState<Record<number, TurnExtras>>({});
   const [drawerFor, setDrawerFor] = useState<number | null>(null);
-  const [resolvedPending, setResolvedPending] = useState<Record<number, "confirmed" | "dismissed">>({});
+  const [resolvedPending, setResolvedPending] = useState<Record<number, "confirmed" | "dismissed" | "expired">>({});
   const [resolvingPending, setResolvingPending] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -134,6 +134,10 @@ function ConversationView({ sessionId }: { sessionId: number }) {
       }
     } catch (e) {
       if (currentSessionId === sessionId) {
+        if (e instanceof ApiError && e.code === "pending_action_expired") {
+          // The proposal can no longer be confirmed; drop its buttons and ask the rider to restate it.
+          setResolvedPending((prev) => ({ ...prev, [action.id]: "expired" }));
+        }
         setSendError(e instanceof ApiError ? e.message : "Couldn't update that proposal.");
       }
     } finally {
@@ -251,7 +255,7 @@ function MessageBubble({
 }: {
   message: MotoMessage;
   extras?: TurnExtras;
-  resolvedPending: Record<number, "confirmed" | "dismissed">;
+  resolvedPending: Record<number, "confirmed" | "dismissed" | "expired">;
   resolvingPending: number | null;
   onResolvePending: (action: MotoPendingAction, decision: "confirm" | "dismiss") => void;
   onOpenEvidence: () => void;

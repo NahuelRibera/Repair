@@ -9,6 +9,7 @@ public record ChatProperties(
         int maxRetrievedChunks,
         int maxOutputTokens,
         int maxEvidenceWords,
-        int odometerStaleDays
+        int odometerStaleDays,
+        int pendingActionExpiryMinutes
 ) {
 }

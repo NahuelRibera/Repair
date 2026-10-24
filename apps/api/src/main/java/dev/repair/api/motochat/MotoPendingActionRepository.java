@@ -1,5 +1,6 @@
 package dev.repair.api.motochat;
 
+import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -53,6 +54,24 @@ public class MotoPendingActionRepository {
                 .query((rs, rowNum) -> new PendingAction(
                         rs.getLong("id"), rs.getLong("garage_vehicle_id"), rs.getDouble("odometer_km"), rs.getString("service_type")))
                 .optional();
+    }
+
+    /** Marks a still-pending action of this user's session as expired when it
+     * was created before {@code oldestConfirmable}; true when it was expired
+     * by this call. */
+    public boolean expireIfStale(long userId, long sessionId, long id, Instant oldestConfirmable) {
+        return jdbcClient.sql(
+                        """
+                        UPDATE moto_pending_actions
+                        SET status = 'expired', resolved_at = now()
+                        WHERE id = :id AND user_id = :userId AND session_id = :sessionId AND status = 'pending'
+                          AND created_at < :cutoff
+                        """)
+                .param("id", id)
+                .param("userId", userId)
+                .param("sessionId", sessionId)
+                .param("cutoff", java.sql.Timestamp.from(oldestConfirmable))
+                .update() > 0;
     }
 
     public void markFailed(long id) {
