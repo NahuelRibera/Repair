@@ -184,6 +184,23 @@ class MotoRetrievalEvaluationIT {
         ensureCorpusLoaded();
         List<EvalCase> cases = loadCases();
 
+        Metrics keywords = evaluate(cases, EvalCase::query, "RETRIEVAL-EVAL");
+        // The rider's own wording, as chat sends it. Reported to track
+        // natural-language retrieval; only isolation is asserted for it.
+        Metrics questions = evaluate(cases, EvalCase::question, "RETRIEVAL-EVAL-QUESTION");
+
+        assertThat(keywords.violations()).as("cross-model or cross-year chunks").isEmpty();
+        assertThat(questions.violations()).as("cross-model or cross-year chunks (questions)").isEmpty();
+        assertThat(keywords.isolation()).as("isolation").isGreaterThanOrEqualTo(MIN_ISOLATION);
+        assertThat(questions.isolation()).as("isolation (questions)").isGreaterThanOrEqualTo(MIN_ISOLATION);
+        assertThat(keywords.hitRate()).as("hit rate at %d, misses: %s", K, keywords.misses())
+                .isGreaterThanOrEqualTo(MIN_HIT_RATE_AT_K);
+    }
+
+    private record Metrics(double isolation, double hitRate, double mrr, List<String> violations, List<String> misses) {
+    }
+
+    private Metrics evaluate(List<EvalCase> cases, java.util.function.Function<EvalCase, String> queryOf, String label) {
         int isolatedQuestions = 0;
         int hits = 0;
         double reciprocalRankSum = 0;
@@ -193,7 +210,7 @@ class MotoRetrievalEvaluationIT {
         for (EvalCase c : cases) {
             long modelId = modelIdBySlug.get(c.model());
             List<MotoRetrievedChunk> results =
-                    retrievalService.hybridSearch(modelId, c.year(), c.query(), new float[1536], ISOLATION_LIMIT);
+                    retrievalService.hybridSearch(modelId, c.year(), queryOf.apply(c), new float[1536], ISOLATION_LIMIT);
 
             boolean isolated = true;
             for (MotoRetrievedChunk chunk : results) {
@@ -230,13 +247,10 @@ class MotoRetrievalEvaluationIT {
         double isolation = (double) isolatedQuestions / cases.size();
         double hitRate = (double) hits / cases.size();
         double mrr = reciprocalRankSum / cases.size();
-        System.out.printf("RETRIEVAL-EVAL questions=%d isolation=%.3f hit@%d=%.3f mrr=%.3f%n",
-                cases.size(), isolation, K, hitRate, mrr);
-        misses.forEach(m -> System.out.println("RETRIEVAL-EVAL miss: " + m));
-
-        assertThat(violations).as("cross-model or cross-year chunks").isEmpty();
-        assertThat(isolation).as("isolation").isGreaterThanOrEqualTo(MIN_ISOLATION);
-        assertThat(hitRate).as("hit rate at %d, misses: %s", K, misses).isGreaterThanOrEqualTo(MIN_HIT_RATE_AT_K);
+        System.out.printf("%s questions=%d isolation=%.3f hit@%d=%.3f mrr=%.3f%n",
+                label, cases.size(), isolation, K, hitRate, mrr);
+        misses.forEach(m -> System.out.println(label + " miss: " + m));
+        return new Metrics(isolation, hitRate, mrr, violations, misses);
     }
 
     private List<EvalCase> loadCases() throws IOException {
