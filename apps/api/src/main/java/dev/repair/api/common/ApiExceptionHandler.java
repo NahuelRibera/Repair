@@ -1,6 +1,7 @@
 package dev.repair.api.common;
 
 import dev.repair.api.garage.OdometerConflictException;
+import dev.repair.api.motochat.PendingActionExpiredException;
 import java.util.Map;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -22,6 +23,11 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.retryAfterSeconds()))
                 .body(Map.of("error", ex.getMessage()));
+    }
+
+    @ExceptionHandler(PendingActionExpiredException.class)
+    public ResponseEntity<Map<String, String>> handlePendingActionExpired(PendingActionExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.GONE).body(Map.of("error", ex.getMessage(), "code", PendingActionExpiredException.CODE));
     }
 
     @ExceptionHandler(BadRequestException.class)

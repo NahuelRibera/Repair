@@ -16,7 +16,9 @@ import dev.repair.api.motorcycle.MotorcycleCatalogRepository;
 import dev.repair.api.motorcycle.MotorcycleFactDto;
 import dev.repair.api.motorcycle.MotorcycleFactLabels;
 import tools.jackson.databind.ObjectMapper;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
@@ -33,6 +35,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,6 +59,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class MotoChatOrchestrationService {
+
+    private static final Logger log = LoggerFactory.getLogger(MotoChatOrchestrationService.class);
 
     private static final String SYSTEM_PROMPT = """
             You are Repair, a motorcycle maintenance and ownership companion. You know the \
@@ -486,6 +492,7 @@ public class MotoChatOrchestrationService {
     private final ObjectMapper objectMapper;
     private final MotoPendingActionRepository pendingActionRepository;
     private final MaintenanceStatusService maintenanceStatusService;
+    private final Clock clock;
 
     public MotoChatOrchestrationService(
             ChatProperties chatProperties, OpenAiProperties openAiProperties, OpenAiClient openAiClient,
@@ -493,7 +500,8 @@ public class MotoChatOrchestrationService {
             MotoChatSessionRepository sessionRepository, GarageVehicleRepository garageVehicleRepository,
             MaintenanceRepository maintenanceRepository, VehiclePreferenceRepository preferenceRepository,
             MotorcycleCatalogRepository catalogRepository, ObjectMapper objectMapper,
-            MotoPendingActionRepository pendingActionRepository, MaintenanceStatusService maintenanceStatusService
+            MotoPendingActionRepository pendingActionRepository, MaintenanceStatusService maintenanceStatusService,
+            Clock clock
     ) {
         this.chatProperties = chatProperties;
         this.openAiProperties = openAiProperties;
@@ -508,6 +516,7 @@ public class MotoChatOrchestrationService {
         this.objectMapper = objectMapper;
         this.pendingActionRepository = pendingActionRepository;
         this.maintenanceStatusService = maintenanceStatusService;
+        this.clock = clock;
     }
 
     public MotoChatTurnResult handleUserMessage(long userId, long sessionId, long garageVehicleId, String userText) {
@@ -733,9 +742,16 @@ public class MotoChatOrchestrationService {
      * the due status recomputed from the stored interval and history. One
      * transaction, so a write that throws leaves the action pending rather
      * than confirmed with nothing saved; a rejected or failed write marks it
-     * failed. */
-    @Transactional
+     * failed. A proposal older than the configured expiry window is marked
+     * expired instead, nothing is written, and the rider is asked to restate it. */
+    @Transactional(noRollbackFor = PendingActionExpiredException.class)
     public MotoChatTurnResult confirmPendingAction(long userId, long sessionId, long actionId) {
+        Instant oldestConfirmable = clock.instant().minus(Duration.ofMinutes(chatProperties.pendingActionExpiryMinutes()));
+        if (pendingActionRepository.expireIfStale(userId, sessionId, actionId, oldestConfirmable)) {
+            log.info("Pending action {} in session {} expired before confirmation; nothing was written", actionId, sessionId);
+            throw new PendingActionExpiredException(
+                    "This proposal has expired, so nothing was saved. Please tell me the reading again if you still want it recorded.");
+        }
         var pending = pendingActionRepository.resolve(userId, sessionId, actionId, "confirmed")
                 .orElseThrow(() -> new NotFoundException("Pending action not found or already resolved"));
         Optional<GarageVehicleDto> found = garageVehicleRepository.find(userId, pending.garageVehicleId());

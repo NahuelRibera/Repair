@@ -72,11 +72,14 @@ class MotoChatOrchestrationServiceTest {
     private MotoPendingActionRepository pendingActionRepository;
 
     private ChatProperties chatProperties;
+    private static final java.time.Clock CLOCK =
+            java.time.Clock.fixed(java.time.Instant.parse("2026-03-01T12:00:00Z"), java.time.ZoneOffset.UTC);
+
     private MotoChatOrchestrationService service;
 
     @BeforeEach
     void setUp() {
-        chatProperties = new ChatProperties(20, 2000, 6, 900, 1200, 30);
+        chatProperties = new ChatProperties(20, 2000, 6, 900, 1200, 30, 30);
         GarageVehicleDto vehicle = new GarageVehicleDto(
                 GARAGE_VEHICLE_ID, MODEL_ID, "Yamaha", "MT-07", 2025, null, null, 20000.0,
                 OffsetDateTime.now(), OffsetDateTime.now()
@@ -101,7 +104,7 @@ class MotoChatOrchestrationServiceTest {
                 new OpenAiProperties("sk-test-key", "gpt-4.1-mini", "text-embedding-3-small", 1536, 30, 2),
                 openAiClient, retrievalService, ragRunRepository, sessionRepository, garageVehicleRepository,
                 maintenanceRepository, preferenceRepository, catalogRepository, JsonMapper.builder().build(),
-                pendingActionRepository, new MaintenanceStatusService(catalogRepository)
+                pendingActionRepository, new MaintenanceStatusService(catalogRepository), CLOCK
         );
     }
 
@@ -169,7 +172,7 @@ class MotoChatOrchestrationServiceTest {
                 chatProperties, new OpenAiProperties("", "gpt-4.1-mini", "text-embedding-3-small", 1536, 30, 2),
                 openAiClient, retrievalService, ragRunRepository, sessionRepository, garageVehicleRepository,
                 maintenanceRepository, preferenceRepository, catalogRepository, JsonMapper.builder().build(),
-                pendingActionRepository, new MaintenanceStatusService(catalogRepository)
+                pendingActionRepository, new MaintenanceStatusService(catalogRepository), CLOCK
         );
 
         MotoChatTurnResult result = unconfigured.handleUserMessage(VISITOR_ID, SESSION_ID, GARAGE_VEHICLE_ID, "hello");
@@ -1906,6 +1909,28 @@ class MotoChatOrchestrationServiceTest {
 
         assertThat(result.answer().summary()).contains("don't have a verified engine oil interval").contains("can't say when it is due");
         assertThat(result.answer().summary()).doesNotContain("remaining");
+    }
+
+    @Test
+    void confirmingAnExpiredProposalIsRefusedAndNothingIsWritten() {
+        when(pendingActionRepository.expireIfStale(
+                VISITOR_ID, SESSION_ID, 9L, CLOCK.instant().minus(java.time.Duration.ofMinutes(30)))).thenReturn(true);
+
+        org.junit.jupiter.api.Assertions.assertThrows(PendingActionExpiredException.class,
+                () -> service.confirmPendingAction(VISITOR_ID, SESSION_ID, 9L));
+
+        verify(pendingActionRepository, never()).resolve(anyLong(), anyLong(), anyLong(), any());
+        verify(garageVehicleRepository, never()).updateOdometerIfOwned(anyLong(), anyLong(), anyDouble());
+    }
+
+    @Test
+    void dismissingStillWorksWithoutAnExpiryCheck() {
+        when(pendingActionRepository.resolve(VISITOR_ID, SESSION_ID, 9L, "dismissed")).thenReturn(Optional.of(
+                new MotoPendingActionRepository.PendingAction(9L, GARAGE_VEHICLE_ID, 18500.0, null)));
+
+        service.dismissPendingAction(VISITOR_ID, SESSION_ID, 9L);
+
+        verify(pendingActionRepository, never()).expireIfStale(anyLong(), anyLong(), anyLong(), any());
     }
 
     @Test

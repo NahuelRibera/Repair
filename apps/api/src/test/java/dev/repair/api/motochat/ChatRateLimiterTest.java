@@ -10,6 +10,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
@@ -71,5 +76,29 @@ class ChatRateLimiterTest {
     void rejectsInvalidConfiguration() {
         assertThrows(IllegalArgumentException.class, () -> new ChatRateLimitProperties(0, 60));
         assertThrows(IllegalArgumentException.class, () -> new ChatRateLimitProperties(1, 0));
+    }
+
+    @Test
+    void concurrentRequestsNeverExceedTheLimit() throws Exception {
+        ChatRateLimiter shared = new ChatRateLimiter(new ChatRateLimitProperties(10, 60), clock);
+        AtomicInteger allowed = new AtomicInteger();
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(16);
+        for (int i = 0; i < 200; i++) {
+            pool.submit(() -> {
+                start.await();
+                try {
+                    shared.acquire(1);
+                    allowed.incrementAndGet();
+                } catch (TooManyRequestsException ignored) {
+                    // expected for everything past the limit
+                }
+                return null;
+            });
+        }
+        start.countDown();
+        pool.shutdown();
+        assertEquals(true, pool.awaitTermination(10, TimeUnit.SECONDS));
+        assertEquals(10, allowed.get());
     }
 }

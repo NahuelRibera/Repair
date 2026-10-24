@@ -7,7 +7,7 @@ import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.beans.factory.annotation.Autowired;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.stereotype.Component;
 
 /**
@@ -23,13 +23,9 @@ public class ChatRateLimiter {
     private final long windowNanos;
     private final Clock clock;
     private final ConcurrentHashMap<Long, Deque<Long>> windows = new ConcurrentHashMap<>();
+    private final AtomicLong lastSweep = new AtomicLong(Long.MIN_VALUE);
 
-    @Autowired
-    public ChatRateLimiter(ChatRateLimitProperties properties) {
-        this(properties, Clock.systemUTC());
-    }
-
-    ChatRateLimiter(ChatRateLimitProperties properties, Clock clock) {
+    public ChatRateLimiter(ChatRateLimitProperties properties, Clock clock) {
         this.maxRequests = properties.maxRequests();
         this.windowNanos = Duration.ofSeconds(properties.windowSeconds()).toNanos();
         this.clock = clock;
@@ -39,7 +35,7 @@ public class ChatRateLimiter {
     public void acquire(long userId) {
         long now = nowNanos();
         if (windows.size() > SWEEP_THRESHOLD) {
-            sweep(now);
+            maybeSweep(now);
         }
         long[] retryAfterNanos = {0};
         windows.compute(userId, (id, window) -> {
@@ -58,7 +54,15 @@ public class ChatRateLimiter {
         }
     }
 
-    private void sweep(long now) {
+    /** Sweeps at most once per window, by one thread, so a large map is not rescanned on every request. */
+    private void maybeSweep(long now) {
+        long last = lastSweep.get();
+        if (last != Long.MIN_VALUE && now - last < windowNanos) {
+            return;
+        }
+        if (!lastSweep.compareAndSet(last, now)) {
+            return;
+        }
         for (Long userId : windows.keySet()) {
             windows.computeIfPresent(userId, (id, w) -> {
                 evictExpired(w, now);

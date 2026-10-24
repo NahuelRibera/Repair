@@ -63,7 +63,7 @@ class ChatRateLimitTest {
         ChatRateLimiter limiter = new ChatRateLimiter(new ChatRateLimitProperties(LIMIT, WINDOW_SECONDS), clock);
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new MotoChatController(sessions, mock(MotoChatOrchestrationService.class),
-                        mock(MotoRagRunRepository.class), new ChatProperties(10, 2000, 5, 500, 100, 30), user, limiter))
+                        mock(MotoRagRunRepository.class), new ChatProperties(10, 2000, 5, 500, 100, 30, 30), user, limiter))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .setValidator(validator)
                 .build();
