@@ -30,7 +30,7 @@ YZF-R7) and model years 2006–2026. Each case has:
 | `model` | Model directory slug under `knowledge/motorcycles/yamaha/` |
 | `year` | Model year the rider selected |
 | `question` | The rider's question, for readers |
-| `query` | Keywords sent to retrieval. Full-text search requires every term to occur in a chunk, so these are chosen to be present in the expected section |
+| `query` | Keywords sent to retrieval, chosen so that every term occurs in the expected section |
 | `expectedSection` | Level-2 heading of the section that must be retrieved |
 
 A separate test checks that the dataset has at least 30 cases, 6 models and 3
@@ -38,7 +38,9 @@ years, that ids are unique, and that every case points to an existing corpus
 document and section, so editing the knowledge files cannot silently
 invalidate the set.
 
-**Metrics** (printed as a `RETRIEVAL-EVAL` line, followed by one line per miss):
+**Metrics** (printed as a `RETRIEVAL-EVAL` line for the `query` keywords and a
+`RETRIEVAL-EVAL-QUESTION` line for the rider's `question` wording, each
+followed by one line per miss):
 
 - **Isolation**: share of questions whose results (up to 20 chunks) all come
   from the selected model and from a document whose year range covers the
@@ -48,8 +50,12 @@ invalidate the set.
 - **MRR**: mean reciprocal rank of the expected section. Reported only, not
   asserted.
 
+The hit-rate threshold applies to the `query` keywords. For the `question`
+wording only isolation is asserted; its hit rate and MRR are reported to
+track natural-language retrieval.
+
 **Scope.** This is a lexical-only evaluation. It uses the curated `query`
-keywords, not the rider's `question` and not the retrieval query that chat
+keywords and the single-sentence `question`, not the retrieval query that chat
 builds from conversation history, and it does not exercise embeddings or the
 vector half of the fusion. Treat hit@5 as an optimistic upper bound for
 keyword retrieval, not as a measure of end-to-end answer quality.
@@ -88,16 +94,33 @@ The model and year filter and the indexed `to_tsvector('english', c.content)`
 expression are unchanged. Empty, punctuation-only or stop-word-only queries
 return no text candidates without an error.
 
-| Metric | Before (plainto_tsquery) | After (OR query) |
-|---|---|---|
-| Isolation | 1.000 | not yet measured |
-| hit@5 | 0.900 (36/40) | not yet measured |
-| MRR | 0.686 | not yet measured |
+Measured on the same corpus, dataset (v1, 40 cases) and harness, with only
+`MotoRetrievalService` differing: before is `main` at `0e28641`, after is the
+RP-GEN-008 branch. Both CI (runs 40042399605 and 40043403575, keyword line)
+and a local Testcontainers run (both lines) gave these values.
 
-The "after" column was not measured in the authoring environment because the
-evaluation needs Docker (Testcontainers). Record the `RETRIEVAL-EVAL` line from
-the first CI run here and keep hit@5 at or above the "before" value; if it
-drops, the ranking needs work rather than the threshold.
+| Metric | Keywords before | Keywords after | Question before | Question after |
+|---|---|---|---|---|
+| Isolation | 1.000 | 1.000 | 1.000 | 1.000 |
+| hit@5 | 0.900 (36/40) | 0.950 (38/40) | 0.300 (12/40) | 0.775 (31/40) |
+| MRR | 0.686 | 0.781 | 0.181 | 0.513 |
+
+Keyword misses after the change: `tenere-2021-oil` (rank 6, previously not
+retrieved) and `r6-2015-brakes` (rank 11, previously a hit). The latter is a
+regression: `ts_rank` rewards terms that occur close together only for AND
+queries, so under the OR query other chunks of that document outrank the
+section where "brake fluid" occurs as a phrase (ranking the all-term chunks by
+the AND query restores it, see below). The three other baseline misses are
+now hits.
+
+Ranking the chunks that contain every term first, by the AND query's
+`ts_rank`, was tried and not adopted. It fixed `r6-2015-brakes` (keywords
+hit@5 0.975, MRR 0.757) but lowered the question wording to hit@5 0.725 and
+MRR 0.469. Natural questions are the purpose of this change.
+
+To reproduce: `cd apps/api && ./mvnw test -Dtest='MotoRetrievalEvaluationIT'`
+(needs Docker) and read the two `RETRIEVAL-EVAL` lines. For the "before"
+values, run the same test file against the previous `MotoRetrievalService`.
 
 **Thresholds.** They are the constants `MIN_ISOLATION` and `MIN_HIT_RATE_AT_K`
 in the test. Isolation must stay at 1.0. The hit-rate threshold is `0.875`
@@ -135,6 +158,10 @@ instead of editing v1, so results stay comparable.
   nothing from another model or a document outside the year range.
 - **`emptyOrPunctuationOnlyQueryReturnsNoTextCandidates`** — blank,
   punctuation-only, stop-word-only and null queries return no results and no error.
+- **`partialMatchRanksTheChunkMatchingMoreTermsFirst`** — a chunk sharing
+  three terms with the question ranks above one sharing a single term.
+- **`unusualInputNeverBreaksTheTextQuery`** — accented, Unicode, tsquery
+  operator and NUL-containing input still finds the matching chunk.
 
 `MotoRetrievalQueryTest` unit-tests the term extraction (no database).
 

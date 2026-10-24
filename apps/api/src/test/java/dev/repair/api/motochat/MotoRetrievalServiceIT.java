@@ -127,6 +127,37 @@ class MotoRetrievalServiceIT {
         assertThat(retrievalService.hybridSearch(model, 2022, null, zeroVector(), 10)).isEmpty();
     }
 
+    @Test
+    void partialMatchRanksTheChunkMatchingMoreTermsFirst() {
+        long manufacturer = insertManufacturer("Yamaha-" + UUID.randomUUID());
+        long model = insertModel(manufacturer, "MT-07-" + UUID.randomUUID());
+        long doc = insertDocument(model, 2022, 2022);
+        insertChunk(doc, "Periodic maintenance", "Coolant", "maintenance",
+                "Replace the coolant every two years and replace the coolant hoses if they crack.");
+        insertChunk(doc, "Periodic maintenance", "Brakes", "maintenance",
+                "Replace the brake fluid every two years and check the brake pads for wear.");
+
+        List<MotoRetrievedChunk> results = retrievalService.hybridSearch(
+                model, 2022, "When should I replace brake fluid and pads on my bike?", zeroVector(), 10);
+
+        assertThat(results).isNotEmpty();
+        assertThat(results.get(0).content()).startsWith("Replace the brake fluid");
+    }
+
+    @Test
+    void unusualInputNeverBreaksTheTextQuery() {
+        long manufacturer = insertManufacturer("Yamaha-" + UUID.randomUUID());
+        long model = insertModel(manufacturer, "Tenere-" + UUID.randomUUID());
+        insertChunk(insertDocument(model, 2022, 2022), "Periodic maintenance", "Engine oil", "maintenance",
+                "Ténéré 700 engine oil: 10W-40, change every 10000 km.");
+
+        for (String q : new String[] {"Ténéré oil?", "10W-40 oil", "MT-07's oil:* & !chain", "½ ⅷ 東京 oil",
+                "o'clock (oil) <-> chain", "\\ oil \" ' \u0000"}) {
+            assertThat(retrievalService.hybridSearch(model, 2022, q, zeroVector(), 10))
+                    .as("query %s", q).isNotEmpty();
+        }
+    }
+
     private long insertManufacturer(String name) {
         return jdbcClient.sql("INSERT INTO motorcycle_manufacturers (canonical_name, slug) VALUES (:n, :s) RETURNING id")
                 .param("n", name).param("s", name.toLowerCase())
