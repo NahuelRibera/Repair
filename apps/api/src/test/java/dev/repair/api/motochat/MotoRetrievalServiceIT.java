@@ -84,6 +84,49 @@ class MotoRetrievalServiceIT {
         assertThat(outsideRange).isEmpty();
     }
 
+    @Test
+    void longConversationalQuestionMatchesUnderTolerantQuery() {
+        long manufacturer = insertManufacturer("Yamaha-" + UUID.randomUUID());
+        long model = insertModel(manufacturer, "MT-07-" + UUID.randomUUID());
+        long doc = insertDocument(model, 2022, 2022);
+        insertChunk(doc, "Periodic maintenance", "Drive chain", "maintenance",
+                "Lubricate the drive chain every 1000 km and check the slack.");
+
+        List<MotoRetrievedChunk> results = retrievalService.hybridSearch(
+                model, 2022, "Hey, how often should I lubricate my chain after riding in heavy rain on holiday?",
+                zeroVector(), 10);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).textScore()).isNotNull();
+    }
+
+    @Test
+    void tolerantQueryStillRespectsModelAndYearFilter() {
+        long manufacturer = insertManufacturer("Yamaha-" + UUID.randomUUID());
+        long mine = insertModel(manufacturer, "MT-07-" + UUID.randomUUID());
+        long other = insertModel(manufacturer, "MT-09-" + UUID.randomUUID());
+        insertChunk(insertDocument(other, 2022, 2022), "Periodic maintenance", "Drive chain", "maintenance",
+                "Other model: lubricate the chain often.");
+        insertChunk(insertDocument(mine, 2020, 2021), "Periodic maintenance", "Drive chain", "maintenance",
+                "Other year: lubricate the chain often.");
+
+        assertThat(retrievalService.hybridSearch(mine, 2022, "how do I lubricate the chain please", zeroVector(), 10))
+                .isEmpty();
+    }
+
+    @Test
+    void emptyOrPunctuationOnlyQueryReturnsNoTextCandidates() {
+        long manufacturer = insertManufacturer("Yamaha-" + UUID.randomUUID());
+        long model = insertModel(manufacturer, "MT-07-" + UUID.randomUUID());
+        insertChunk(insertDocument(model, 2022, 2022), "Periodic maintenance", "Drive chain", "maintenance",
+                "Lubricate the chain.");
+
+        for (String q : new String[] {"", "   ", "?!...", "the and of", "'; | & !"}) {
+            assertThat(retrievalService.hybridSearch(model, 2022, q, zeroVector(), 10)).isEmpty();
+        }
+        assertThat(retrievalService.hybridSearch(model, 2022, null, zeroVector(), 10)).isEmpty();
+    }
+
     private long insertManufacturer(String name) {
         return jdbcClient.sql("INSERT INTO motorcycle_manufacturers (canonical_name, slug) VALUES (:n, :s) RETURNING id")
                 .param("n", name).param("s", name.toLowerCase())

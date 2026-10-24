@@ -77,6 +77,28 @@ are not explained by missing vocabulary. Possible causes are terms split
 across chunk boundaries or ranking against other sections; they have not been
 investigated and are kept in the set rather than edited to raise the score.
 
+**Text query change (RP-GEN-008).** The text pool used `plainto_tsquery`, which
+requires every word of the query to occur in one chunk. It now builds an OR
+`to_tsquery('english', ...)` from the letter/digit terms of the query (distinct,
+at least 2 characters, at most 24, stop words dropped by the `english`
+configuration), so a chunk matching a meaningful subset of the terms is a
+candidate and `ts_rank` orders chunks by how well they match. Terms are
+extracted as plain word runs, so no tsquery operators can come from user text.
+The model and year filter and the indexed `to_tsvector('english', c.content)`
+expression are unchanged. Empty, punctuation-only or stop-word-only queries
+return no text candidates without an error.
+
+| Metric | Before (plainto_tsquery) | After (OR query) |
+|---|---|---|
+| Isolation | 1.000 | not yet measured |
+| hit@5 | 0.900 (36/40) | not yet measured |
+| MRR | 0.686 | not yet measured |
+
+The "after" column was not measured in the authoring environment because the
+evaluation needs Docker (Testcontainers). Record the `RETRIEVAL-EVAL` line from
+the first CI run here and keep hit@5 at or above the "before" value; if it
+drops, the ranking needs work rather than the threshold.
+
 **Thresholds.** They are the constants `MIN_ISOLATION` and `MIN_HIT_RATE_AT_K`
 in the test. Isolation must stay at 1.0. The hit-rate threshold is `0.875`
 (35/40), one case below the CI baseline. Never lower a threshold to make a
@@ -107,6 +129,14 @@ instead of editing v1, so results stay comparable.
 - **`documentOutsideItsYearRangeDoesNotMatch`** — a document with
   `year_from=2021, year_to=2023` matches a 2022 query and returns nothing
   for a 2024 query on the same model.
+- **`longConversationalQuestionMatchesUnderTolerantQuery`** — a long,
+  wordy question matches a chunk that contains only some of its words.
+- **`tolerantQueryStillRespectsModelAndYearFilter`** — the OR query returns
+  nothing from another model or a document outside the year range.
+- **`emptyOrPunctuationOnlyQueryReturnsNoTextCandidates`** — blank,
+  punctuation-only, stop-word-only and null queries return no results and no error.
+
+`MotoRetrievalQueryTest` unit-tests the term extraction (no database).
 
 `apps/api/src/test/java/dev/repair/api/garage/MaintenanceStatusServiceTest.java`
 covers the numeric worked examples (see `docs/maintenance-tracking.md`).

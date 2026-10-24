@@ -2,8 +2,13 @@ package dev.repair.api.motochat;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -21,6 +26,9 @@ public class MotoRetrievalService {
 
     private static final int RRF_K = 60;
     private static final int CANDIDATE_POOL_SIZE = 20;
+
+    private static final int MAX_QUERY_TERMS = 24;
+    private static final Pattern TERM = Pattern.compile("[\\p{L}\\p{N}]+");
 
     private final JdbcClient jdbcClient;
 
@@ -49,25 +57,59 @@ public class MotoRetrievalService {
                 .query(ScoredRow::fromResultSet)
                 .list();
 
-        List<ScoredRow> textRows = jdbcClient.sql(
+        List<ScoredRow> textRows = textSearch(modelId, year, queryText);
+
+        return fuse(vectorRows, textRows, limit);
+    }
+
+    /**
+     * Full-text candidates for any of the question's terms, ranked by how many
+     * (and how well) they match. plainto_tsquery would AND every word, so a long
+     * natural question rarely matched a single chunk. The model and year filter
+     * is identical to the vector pool, and the tsvector expression is unchanged
+     * so the GIN index stays usable.
+     */
+    private List<ScoredRow> textSearch(long modelId, int year, String queryText) {
+        String tsQuery = toOrTsQuery(queryText);
+        if (tsQuery.isEmpty()) {
+            return List.of();
+        }
+        return jdbcClient.sql(
                         """
                         SELECT c.id, c.document_id, c.section, c.subsection, c.category, c.heading, c.section_path, c.content,
-                               ts_rank(to_tsvector('english', c.content), plainto_tsquery('english', :query)) AS score
+                               ts_rank(to_tsvector('english', c.content), to_tsquery('english', :query)) AS score
                         FROM motorcycle_knowledge_chunks c
                         JOIN motorcycle_knowledge_documents d ON d.id = c.document_id
-                        WHERE plainto_tsquery('english', :query) @@ to_tsvector('english', c.content)
+                        WHERE to_tsquery('english', :query) @@ to_tsvector('english', c.content)
                           AND d.model_id = :modelId AND d.year_from <= :year AND d.year_to >= :year
                         ORDER BY score DESC
                         LIMIT :limit
                         """)
-                .param("query", queryText)
+                .param("query", tsQuery)
                 .param("modelId", modelId)
                 .param("year", year)
                 .param("limit", CANDIDATE_POOL_SIZE)
                 .query(ScoredRow::fromResultSet)
                 .list();
+    }
 
-        return fuse(vectorRows, textRows, limit);
+    /**
+     * Builds an OR tsquery from letter/digit runs only, so user text can never
+     * inject tsquery operators. Stop words are dropped by the 'english'
+     * configuration. Returns an empty string when no usable term remains.
+     */
+    static String toOrTsQuery(String queryText) {
+        if (queryText == null) {
+            return "";
+        }
+        Set<String> terms = new LinkedHashSet<>();
+        Matcher m = TERM.matcher(queryText.toLowerCase(Locale.ROOT));
+        while (m.find() && terms.size() < MAX_QUERY_TERMS) {
+            if (m.group().length() >= 2) {
+                terms.add(m.group());
+            }
+        }
+        return String.join(" | ", terms);
     }
 
     private List<MotoRetrievedChunk> fuse(List<ScoredRow> vectorRows, List<ScoredRow> textRows, int limit) {
