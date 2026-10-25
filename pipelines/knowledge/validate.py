@@ -48,6 +48,7 @@ RULES: dict[str, tuple[str, str]] = {
     "unit-unknown": (WARNING, "A fact-index value uses a unit the schema does not list."),
     "entry-duplicate": (ERROR, "Two files cover the same manufacturer, model, market, variant and years."),
     "entry-overlap": (ERROR, "Two files cover overlapping years for the same manufacturer, model, market and variant."),
+    "market-sibling": (ERROR, "A served file covers a model year another market already covers; retrieval does not select by market."),
     "fact-index-duplicate": (ERROR, "The fact index lists the same fact twice with different values."),
     "fact-index-conflict": (ERROR, "A fact elsewhere in the file disagrees with the fact index."),
 }
@@ -178,7 +179,7 @@ def _check_frontmatter(pf: ParsedFile, path: Path) -> list[Finding]:
             out.append(_finding(pf.file, at("model"), "path-mismatch", f"model slug {slugify(meta['model'])!r} does not match directory {model_dir!r}"))
         if isinstance(meta.get("manufacturer"), str) and meta["manufacturer"].strip() and slugify(meta["manufacturer"]) != manufacturer_dir:
             out.append(_finding(pf.file, at("manufacturer"), "path-mismatch", f"manufacturer slug {slugify(meta['manufacturer'])!r} does not match directory {manufacturer_dir!r}"))
-    if isinstance(yf, int) and not isinstance(yf, bool) and path.stem != str(yf):
+    if isinstance(yf, int) and not isinstance(yf, bool) and path.stem not in schema.file_stems(meta):
         out.append(_finding(pf.file, at("year_from"), "path-mismatch", f"file name {path.name!r} does not match year_from {yf}"))
     return out
 
@@ -316,7 +317,7 @@ def _check_entries(entries: list[tuple[str, dict]]) -> list[Finding]:
         key = (slugify(meta["manufacturer"]), slugify(meta["model"]), meta["market"],
                _norm_label(variant) if isinstance(variant, str) else "")
         groups[key].append((rel, yf, yt))
-    out = []
+    out = _market_siblings(entries)
     for key, items in groups.items():
         items.sort(key=lambda t: (t[1], t[2], t[0]))
         for i, (rel_a, a_from, a_to) in enumerate(items):
@@ -328,6 +329,33 @@ def _check_entries(entries: list[tuple[str, dict]]) -> list[Finding]:
                     out.append(_finding(rel_b, 1, "entry-duplicate", f"same {what} years {a_from}-{a_to} as {rel_a}"))
                 else:
                     out.append(_finding(rel_b, 1, "entry-overlap", f"{what} years {b_from}-{b_to} overlap {a_from}-{a_to} in {rel_a}"))
+    return out
+
+
+def _market_siblings(entries: list[tuple[str, dict]]) -> list[Finding]:
+    """Served files for the same motorcycle and model year in different markets.
+
+    Fact and chunk retrieval select by model and year only, so a rider could get another market's value
+    (valve-clearance intervals differ between the EU and North America, for example). Until retrieval selects
+    by market, a second market belongs in knowledge/staging/, which is never ingested."""
+    seen: dict[tuple, tuple[str, str]] = {}
+    out = []
+    for rel, meta in sorted(entries):
+        if not rel.startswith("knowledge/motorcycles/"):
+            continue
+        yf, yt = meta.get("year_from"), meta.get("year_to")
+        if not (all(isinstance(y, int) and not isinstance(y, bool) for y in (yf, yt)) and yt >= yf
+                and all(isinstance(meta.get(k), str) and meta[k].strip() for k in ("manufacturer", "model", "market"))):
+            continue
+        variant = _norm_label(meta["variant"]) if isinstance(meta.get("variant"), str) else ""
+        for year in range(yf, yt + 1):
+            key = (slugify(meta["manufacturer"]), slugify(meta["model"]), variant, year)
+            other = seen.setdefault(key, (rel, meta["market"]))
+            if other[1] != meta["market"]:
+                out.append(_finding(rel, 1, "market-sibling",
+                                    f"{key[0]}/{key[1]} {year} is already served for market {other[1]} by {other[0]};"
+                                    " retrieval does not select by market yet, so keep this file in knowledge/staging/"))
+                break
     return out
 
 

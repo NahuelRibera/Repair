@@ -1,0 +1,143 @@
+# Evidence for knowledge/staging/motorcycles/yamaha/tenere-700/2021-eu.md, generated with `python -m knowledge.draft`.
+# Confirming source: the 2021 EU owner's manual (BEH-F8199-E0). The 2021 US owner's manual is cited as a second,
+# independent document where it states the same value; values that differ between the two (valve-clearance
+# interval, minimum tread depth) cite only the EU document.
+knowledge_file: knowledge/staging/motorcycles/yamaha/tenere-700/2021-eu.md
+profile:
+  manufacturer: Yamaha
+  model: Ténéré 700
+  year_from: 2021
+  year_to: 2021
+  market: EU
+  aliases: [Ténéré 700, Tenere 700, T7, XTZ690]
+claims:
+  - {fact: Displacement, value: 689 cm³, section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, engine", value: "689 cm³"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, engine", value: "689 cm³"}]}
+  - {fact: Bore × stroke, value: 80.0 × 68.6 mm, section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, engine", value: "80.0 × 68.6 mm"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, engine", value: "80.0 × 68.6 mm"}]}
+  - {fact: Oil change, value: "2.30 L (2.43 US qt, 2.02 Imp.qt)", section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, engine oil quantity without oil filter cartridge replacement", value: "2.30 L"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, engine oil quantity", value: "2.30 L"}]}
+  - {fact: Oil + filter, value: "2.60 L (2.75 US qt, 2.29 Imp.qt)", section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, engine oil quantity with oil filter cartridge replacement", value: "2.60 L"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, engine oil quantity", value: "2.60 L"}]}
+  - {fact: Fuel capacity, value: 16 L, section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, fuel tank capacity", value: "16 L"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, fuel tank capacity", value: "16 L"}]}
+  - {fact: Fuel reserve, value: 4.3 L, section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, fuel reserve amount", value: "4.3 L"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, fuel reserve amount", value: "4.3 L"}]}
+  - {fact: Front tire pressure, value: "220 kPa (2.20 kgf/cm², 32 psi)", section: High-value fact index, index: true,
+     notes: Solo and with a passenger; the off-road value is listed under Tires and wheels.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Tires, cold tire air pressure, 1 and 2 persons", value: "220 kPa"},
+               {source: yamaha-om-lit-11626-34-01, location: "Tires, cold tire air pressure", value: "220 kPa"}]}
+  - {fact: Rear tire pressure, value: "250 kPa (2.50 kgf/cm², 36 psi)", section: High-value fact index, index: true,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Tires, cold tire air pressure, 1 and 2 persons", value: "250 kPa"},
+               {source: yamaha-om-lit-11626-34-01, location: "Tires, cold tire air pressure", value: "250 kPa"}]}
+  - {fact: Valve-clearance interval, value: 40000 km (24000 mi), section: High-value fact index, index: true,
+     notes: The US edition checks every 42000 km (26600 mi); the value is market specific.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Periodic maintenance chart for the emission control system", value: "40000 km"}]}
+  - {fact: Engine oil, value: "first change at 1000 km, then at every 10000 km service point", section: Periodic maintenance framework > Major recurring maintenance facts,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "General maintenance and lubrication chart, engine oil", value: "first change at 1000 km, then at every 10000 km service point"}]}
+  - {fact: Valve clearance, value: 40000 km, section: Periodic maintenance framework > Major recurring maintenance facts,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Periodic maintenance chart for the emission control system", value: "40000 km"}]}
+  - {fact: Brake fluid, value: 2 years, section: Periodic maintenance framework > Major recurring maintenance facts,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "General maintenance and lubrication chart, brake fluid", value: "2 years"},
+               {source: yamaha-om-lit-11626-34-01, location: "Periodic maintenance chart, brake fluid", value: "2 years"}]}
+  - {fact: Brake hoses, value: 4 years, section: Periodic maintenance framework > Major recurring maintenance facts,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "General maintenance and lubrication chart, brake hoses", value: "4 years"},
+               {source: yamaha-om-lit-11626-34-01, location: "Periodic maintenance chart, brake hoses", value: "4 years"}]}
+  - {fact: Coolant replacement, value: 3 years, section: Periodic maintenance framework > Major recurring maintenance facts,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "General maintenance and lubrication chart, cooling system", value: "3 years"},
+               {source: yamaha-om-lit-11626-34-01, location: "Periodic maintenance chart, cooling system", value: "3 years"}]}
+  - {fact: Recommended oil viscosity, value: SAE 10W-40, section: Engine oil,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, engine oil", value: "SAE 10W-40"}]}
+  - {fact: Recommended oil grade, value: "API service SG or higher, JASO MA", section: Engine oil,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, engine oil", value: "API service SG or higher, JASO MA"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, engine oil", value: "API service SG or higher, JASO MA"}]}
+  - {fact: Oil-filter cartridge torque, value: "17 N·m (1.7 kgf·m, 13 lb·ft)", section: Oil filter and drain fasteners,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Engine oil and oil filter cartridge", value: "17 N·m"},
+               {source: yamaha-om-lit-11626-34-01, location: "Engine oil and oil filter cartridge", value: "17 N·m"}]}
+  - {fact: Engine-oil drain-bolt torque, value: "43 N·m (4.3 kgf·m, 32 lb·ft)", section: Oil filter and drain fasteners,
+     notes: The drain bolt takes a new gasket.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Engine oil and oil filter cartridge", value: "43 N·m"},
+               {source: yamaha-om-lit-11626-34-01, location: "Engine oil and oil filter cartridge", value: "43 N·m"}]}
+  - {fact: Spark plug, value: NGK/LMAR8A-9, section: Spark plugs,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Spark plugs, checking", value: "NGK/LMAR8A-9"},
+               {source: yamaha-om-lit-11626-34-01, location: "Spark plugs, checking", value: "NGK/LMAR8A-9"}]}
+  - {fact: Spark plug gap, value: 0.8–0.9 mm (0.031–0.035 in), section: Spark plugs,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Spark plugs, checking", value: "0.8–0.9 mm"},
+               {source: yamaha-om-lit-11626-34-01, location: "Spark plugs, checking", value: "0.8–0.9 mm"}]}
+  - {fact: Spark plug torque, value: "13 N·m (1.3 kgf·m, 9.6 lb·ft)", section: Spark plugs,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Spark plugs, checking", value: "13 N·m"},
+               {source: yamaha-om-lit-11626-34-01, location: "Spark plugs, checking", value: "13 N·m"}]}
+  - {fact: Coolant reservoir capacity, value: "0.25 L (0.26 US qt, 0.22 Imp.qt)", section: Cooling system,
+     notes: Up to the maximum level mark.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, coolant quantity", value: "0.25 L"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, coolant quantity", value: "0.25 L"}]}
+  - {fact: Radiator capacity, value: "1.60 L (1.69 US qt, 1.41 Imp.qt)", section: Cooling system,
+     notes: Including all routes.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, coolant quantity", value: "1.60 L"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, coolant quantity", value: "1.60 L"}]}
+  - {fact: Front tire size, value: 90/90-21 M/C 54V M+S with tube, section: Tires and wheels,
+     notes: Original fitment PIRELLI SCORPION RALLY STR A; the optional MICHELIN ANAKEE WILD is rated 54R.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, front tire", value: "90/90-21 M/C 54V M+S with tube"}]}
+  - {fact: Rear tire size, value: 150/70 R18 M/C 70V M+S with tube, section: Tires and wheels,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, rear tire", value: "150/70 R18 M/C 70V M+S with tube"}]}
+  - {fact: Front off-road tire pressure, value: "200 kPa (2.00 kgf/cm², 29 psi)", section: Tires and wheels,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Tires, cold tire air pressure, off-road riding", value: "200 kPa"}]}
+  - {fact: Rear off-road tire pressure, value: "200 kPa (2.00 kgf/cm², 29 psi)", section: Tires and wheels,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Tires, cold tire air pressure, off-road riding", value: "200 kPa"}]}
+  - {fact: Minimum tread depth, value: 1.6 mm (0.06 in), section: Tires and wheels,
+     notes: The US edition gives 1.0 mm; the value is market specific.,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Tires, minimum tire tread depth", value: "1.6 mm"}]}
+  - {fact: Brake fluid type, value: DOT 4, section: Brakes,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Brake fluid level, checking", value: "DOT 4"},
+               {source: yamaha-om-lit-11626-34-01, location: "Brake fluid level, checking", value: "DOT 4"}]}
+  - {fact: Drive chain slack, value: 43.0–48.0 mm (1.69–1.89 in), section: Drive chain,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Drive chain slack", value: "43.0–48.0 mm"},
+               {source: yamaha-om-lit-11626-34-01, location: "Drive chain slack", value: "43.0–48.0 mm"}]}
+  - {fact: Rear axle nut torque, value: "105 N·m (10.5 kgf·m, 77 lb·ft)", section: Drive chain,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Drive chain slack, adjusting", value: "105 N·m"},
+               {source: yamaha-om-lit-11626-34-01, location: "Drive chain slack, adjusting", value: "105 N·m"}]}
+  - {fact: Chain-adjuster locknut torque, value: "16 N·m (1.6 kgf·m, 12 lb·ft)", section: Drive chain,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Drive chain slack, adjusting", value: "16 N·m"},
+               {source: yamaha-om-lit-11626-34-01, location: "Drive chain slack, adjusting", value: "16 N·m"}]}
+  - {fact: Clutch lever free play, value: 5.0–10.0 mm (0.20–0.39 in), section: Clutch,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Clutch lever free play, adjusting", value: "5.0–10.0 mm"},
+               {source: yamaha-om-lit-11626-34-01, location: "Clutch lever free play, adjusting", value: "5.0–10.0 mm"}]}
+  - {fact: Throttle grip free play, value: 3.0–5.0 mm (0.12–0.20 in), section: Throttle,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Throttle grip free play, checking", value: "3.0–5.0 mm"},
+               {source: yamaha-om-lit-11626-34-01, location: "Throttle grip free play, checking", value: "3.0–5.0 mm"}]}
+  - {fact: Battery, value: YTZ10S, section: Battery and charging,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, battery", value: "YTZ10S"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, battery", value: "YTZ10S"}]}
+  - {fact: Battery capacity, value: "12 V, 8.6 Ah (10 HR)", section: Battery and charging,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Specifications, battery", value: "12 V, 8.6 Ah (10 HR)"},
+               {source: yamaha-om-lit-11626-34-01, location: "Specifications, battery", value: "12 V, 8.6 Ah (10 HR)"}]}
+  - {fact: Main fuse, value: 30.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "30.0 A"}]}
+  - {fact: ABS motor fuse, value: 30.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "30.0 A"}]}
+  - {fact: ABS solenoid fuse, value: 20.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "20.0 A"}]}
+  - {fact: Headlight fuse, value: 10.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "10.0 A"}]}
+  - {fact: Ignition fuse, value: 10.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "10.0 A"}]}
+  - {fact: Radiator fan motor fuse, value: 10.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "10.0 A"}]}
+  - {fact: Fuel injection system fuse, value: 10.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "10.0 A"}]}
+  - {fact: Signaling system fuse, value: 7.5 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "7.5 A"}]}
+  - {fact: Hazard fuse, value: 7.5 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "7.5 A"}]}
+  - {fact: ABS control unit fuse, value: 7.5 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "7.5 A"}]}
+  - {fact: Backup fuse, value: 7.5 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "7.5 A"}]}
+  - {fact: Auxiliary fuse, value: 2.0 A, section: Fuse reference,
+     sources: [{source: yamaha-om-beh-f8199-e0, location: "Fuses, replacing", value: "2.0 A"}]}
