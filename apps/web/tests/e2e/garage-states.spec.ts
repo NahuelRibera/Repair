@@ -10,6 +10,9 @@ const MOCK_USER = {
   updatedAt: "2026-01-01T00:00:00Z",
 };
 
+// Requests fail until "Try again" is clicked rather than for the first call only: under
+// `next dev`, React Strict Mode runs each effect twice, so a count-based mock lets the
+// duplicate initial request succeed and the error state never renders.
 test.describe("garage loading, empty and error states", () => {
   test.beforeEach(async ({ page }) => {
     await page.route("**/api/me", (route) => route.fulfill({ json: MOCK_USER }));
@@ -17,16 +20,16 @@ test.describe("garage loading, empty and error states", () => {
   });
 
   test("garage list shows an error with retry, then the empty state", async ({ page }) => {
-    let calls = 0;
+    let failing = true;
     await page.route("**/api/garage/vehicles", (route) => {
       if (route.request().method() !== "GET") return route.continue();
-      calls += 1;
-      if (calls === 1) return route.fulfill({ status: 500, json: { error: "boom" } });
+      if (failing) return route.fulfill({ status: 500, json: { error: "boom" } });
       return route.fulfill({ json: [] });
     });
 
     await page.goto("/garage");
-    await expect(page.getByRole("alert")).toHaveText("Couldn't load your garage.");
+    await expect(page.getByText("Couldn't load your garage.")).toBeVisible();
+    failing = false;
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByText("You haven't added a motorcycle yet.")).toBeVisible();
     await expect(page.getByRole("heading", { level: 1, name: "My Garage" })).toBeVisible();
@@ -42,17 +45,17 @@ test.describe("garage loading, empty and error states", () => {
       nickname: null,
       currentOdometerKm: 1200,
     };
-    let calls = 0;
+    let failing = true;
     await page.route("**/api/garage/vehicles/7", (route) => {
-      calls += 1;
-      if (calls === 1) return route.fulfill({ status: 500, json: { error: "boom" } });
+      if (failing) return route.fulfill({ status: 500, json: { error: "boom" } });
       return route.fulfill({ json: vehicle });
     });
     await page.route("**/api/garage/vehicles/7/dashboard", (route) => route.fulfill({ json: [] }));
     await page.route("**/api/garage/vehicles/7/maintenance", (route) => route.fulfill({ json: [] }));
 
     await page.goto("/garage/7");
-    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    failing = false;
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(page.getByText("No maintenance recorded yet.")).toBeVisible();
     await expect(page.getByLabel("Current odometer (km)")).toBeVisible();
