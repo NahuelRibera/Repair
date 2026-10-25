@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import dev.repair.api.auth.AppUserDto;
 import dev.repair.api.auth.AuthenticatedUserContext;
+import dev.repair.api.common.BadRequestException;
 import dev.repair.api.common.NotFoundException;
 import dev.repair.api.motorcycle.ModelDetailDto;
 import dev.repair.api.motorcycle.MotorcycleCatalogRepository;
@@ -145,5 +146,40 @@ class GarageVehicleControllerTest {
         when(garageVehicleRepository.deleteVehicleAndAllData(VISITOR_ID, 999L)).thenReturn(false);
 
         assertThatThrownBy(() -> controller.delete(999L)).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void nicknameOfExactlyTheLimitIsAcceptedOnCreateAndOneOverIsRejected() {
+        when(garageVehicleRepository.create(eq(VISITOR_ID), eq(MODEL_ID), eq(YEAR), any(), any())).thenReturn(7L);
+        when(garageVehicleRepository.find(VISITOR_ID, 7L)).thenReturn(Optional.of(sampleDto(7L)));
+
+        var ok = controller.create(new CreateGarageVehicleRequest(MODEL_ID, YEAR, "a".repeat(60), true));
+        assertThat(ok.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        assertThatThrownBy(() -> controller.create(new CreateGarageVehicleRequest(MODEL_ID, YEAR, "a".repeat(61), true)))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("60 characters");
+    }
+
+    @Test
+    void nicknameOverTheLimitIsRejectedOnUpdateAndNothingIsWritten() {
+        assertThatThrownBy(() -> controller.update(42L, new UpdateGarageVehicleRequest("a".repeat(61), null)))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("60 characters");
+        verify(garageVehicleRepository, never()).update(anyLong(), anyLong(), any(), any());
+    }
+
+    @Test
+    void odometerAtTheLimitIsAcceptedAndAboveOrNegativeIsRejected() {
+        when(garageVehicleRepository.isOwned(VISITOR_ID, 42L)).thenReturn(true);
+        when(garageVehicleRepository.update(VISITOR_ID, 42L, "a".repeat(60), 500_000.0)).thenReturn(true);
+        when(garageVehicleRepository.find(VISITOR_ID, 42L)).thenReturn(Optional.of(sampleDto(42L)));
+
+        controller.update(42L, new UpdateGarageVehicleRequest("a".repeat(60), 500_000.0));
+        verify(garageVehicleRepository).update(VISITOR_ID, 42L, "a".repeat(60), 500_000.0);
+
+        assertThatThrownBy(() -> controller.update(42L, new UpdateGarageVehicleRequest(null, 500_000.1)))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("out of range");
+        assertThatThrownBy(() -> controller.update(42L, new UpdateGarageVehicleRequest(null, -1.0)))
+                .isInstanceOf(BadRequestException.class);
+        verify(garageVehicleRepository, never()).update(VISITOR_ID, 42L, null, 500_000.1);
     }
 }

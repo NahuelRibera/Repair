@@ -14,6 +14,8 @@ import dev.repair.api.common.BadRequestException;
 import dev.repair.api.common.NotFoundException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -134,5 +136,46 @@ class MaintenanceControllerTest {
 
         assertThatThrownBy(() -> controller.deleteMaintenance(VEHICLE_ID, EVENT_ID)).isInstanceOf(NotFoundException.class);
         verify(maintenanceRepository, never()).deleteOwnedEvent(anyLong(), anyLong(), anyLong());
+    }
+
+    private static Map<String, Object> keys(int n) {
+        Map<String, Object> data = new HashMap<>();
+        for (int i = 0; i < n; i++) {
+            data.put("k" + i, 1);
+        }
+        return data;
+    }
+
+    @Test
+    void preferenceWithTwentyKeysIsSavedAndTwentyOneIsRejected() {
+        when(garageVehicleRepository.isOwned(USER_ID, VEHICLE_ID)).thenReturn(true);
+
+        controller.savePreference(VEHICLE_ID, new SaveVehiclePreferenceRequest("TIRE_PRESSURE", "ROAD", keys(20)));
+        verify(preferenceRepository).upsert(org.mockito.ArgumentMatchers.eq(VEHICLE_ID), any(), any(), any());
+
+        assertThatThrownBy(() -> controller.savePreference(VEHICLE_ID,
+                new SaveVehiclePreferenceRequest("TIRE_PRESSURE", "ROAD", keys(21))))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("20 keys");
+    }
+
+    @Test
+    void preferenceSerializedSizeIsBoundedAt2048Bytes() {
+        when(garageVehicleRepository.isOwned(USER_ID, VEHICLE_ID)).thenReturn(true);
+        // {"v":"<n x a>"} has 8 bytes of JSON overhead around the value.
+        controller.savePreference(VEHICLE_ID, new SaveVehiclePreferenceRequest(
+                "TIRE_PRESSURE", "ROAD", Map.of("v", "a".repeat(2048 - 8))));
+        verify(preferenceRepository).upsert(org.mockito.ArgumentMatchers.eq(VEHICLE_ID), any(), any(), any());
+
+        assertThatThrownBy(() -> controller.savePreference(VEHICLE_ID, new SaveVehiclePreferenceRequest(
+                "TIRE_PRESSURE", "ROAD", Map.of("v", "a".repeat(2048 - 7)))))
+                .isInstanceOf(BadRequestException.class).hasMessageContaining("2048 bytes");
+    }
+
+    @Test
+    void maintenanceOdometerLimitMatchesTheSharedConstant() {
+        when(garageVehicleRepository.isOwned(USER_ID, VEHICLE_ID)).thenReturn(true);
+        assertThatThrownBy(() -> controller.createMaintenance(VEHICLE_ID, new CreateMaintenanceEventRequest(
+                "ENGINE_OIL_CHANGE", GarageLimits.MAX_ODOMETER_KM + 1, null, null)))
+                .isInstanceOf(BadRequestException.class);
     }
 }

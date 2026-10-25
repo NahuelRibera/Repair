@@ -39,6 +39,7 @@ public class GarageVehicleController {
 
     @PostMapping("/api/garage/vehicles")
     public ResponseEntity<GarageVehicleDto> create(@Valid @RequestBody CreateGarageVehicleRequest request) {
+        GarageLimits.checkNickname(request.nickname());
         ModelDetailDto model = catalogRepository.findModelDetail(request.modelId())
                 .orElseThrow(() -> new BadRequestException("Unknown motorcycle model"));
         if (!catalogRepository.hasKnowledgeCoverage(request.modelId(), request.year())) {
@@ -75,9 +76,8 @@ public class GarageVehicleController {
 
     @PatchMapping("/api/garage/vehicles/{id}")
     public GarageVehicleDto update(@PathVariable long id, @RequestBody UpdateGarageVehicleRequest request) {
-        if (request.currentOdometerKm() != null && request.currentOdometerKm() < 0) {
-            throw new BadRequestException("Odometer cannot be negative");
-        }
+        GarageLimits.checkNickname(request.nickname());
+        GarageLimits.checkOdometer(request.currentOdometerKm());
         if (!garageVehicleRepository.isOwned(currentUser.getUserId(), id)) {
             throw new NotFoundException("Garage vehicle not found");
         }
