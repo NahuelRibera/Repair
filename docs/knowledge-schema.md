@@ -1,6 +1,6 @@
 # Knowledge file schema
 
-Schema version: **1.0**. The machine-readable definition is
+Schema version: **1.1** (1.1 adds market-suffixed file names and the `market-sibling` rule). The machine-readable definition is
 [`pipelines/knowledge/schema.py`](../pipelines/knowledge/schema.py) (`load_schema()` returns it as
 plain data). The schema describes what the current corpus under `knowledge/motorcycles/` already
 uses; it does not require rewriting any file.
@@ -38,6 +38,7 @@ a knowledge file.
 | `unit-invalid` | error | non-canonical spelling of a schema unit after a number (`Nm`, `kpa`, `litres`, `ml`, ...); for `ml`/`mL` the message also says to divide the value by 1000 (`400 mL` = `0.4 L`) |
 | `unit-unknown` | warning | fact-index value with a unit the schema and the accepted extras (`bar`, `kg`, `V`, `Ah`, `rpm`, `years`, ...) do not list |
 | `entry-duplicate` / `entry-overlap` | error | two files for the same manufacturer, model, market and variant with identical or overlapping years |
+| `market-sibling` | error | a served file covers a model year that another market already covers (retrieval does not select by market yet; such files go to `knowledge/staging/`) |
 | `fact-index-duplicate` | error | the fact index lists one fact twice with different values |
 | `fact-index-conflict` | error | a `- Label: value` line or two-column table row elsewhere in the file has the same label as a fact-index row but a different quantity in the same unit |
 
@@ -49,7 +50,8 @@ entries, or when a new rule is introduced and the existing corpus cannot yet sat
 
 ## Layout
 
-`knowledge/motorcycles/<manufacturer-slug>/<model-slug>/<year_from>.md`. Slugs are produced by
+`knowledge/motorcycles/<manufacturer-slug>/<model-slug>/<year_from>.md`, or `<year_from>-<market>.md` (market in
+lower case, e.g. `2021-eu.md`) for a second market of the same model year. Slugs are produced by
 `ingest.normalize.slugify` from the `manufacturer` and `model` values.
 
 ## Front matter
@@ -101,11 +103,11 @@ documentation of current usage, not a whitelist.
 Write exactly `not captured as an exact model-year value`. Do not leave a cell empty, write
 `n/a`/`TBD`, estimate, or copy a value from another model year or variant.
 
-## Provenance (reserved)
+## Provenance
 
-Per-value provenance is not recorded yet. It can be added without breaking the format through an
-optional `provenance` front matter mapping (fact label to source id) and/or an inline
-`<!-- src:<source-id> -->` comment after a value. Files without either stay valid.
+Provenance is recorded outside the knowledge files, in `knowledge/evidence/` (see
+[knowledge-verification.md](knowledge-verification.md)); knowledge files stay plain technical records. The
+reserved `provenance` front matter key and inline `<!-- src:... -->` comments remain valid but are not used.
 
 ## Example skeleton
 

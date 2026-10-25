@@ -1,0 +1,10 @@
+# Motorcycles identified for knowledge coverage that have no knowledge file yet (docs/knowledge-verification.md).
+# An entry names one manufacturer, model, market and model-year range, and the registered sources found for it.
+# Only motorcycles whose identity is documented belong here; a knowledge file, once written, makes its entry
+# redundant (the coverage report then counts the file).
+motorcycles:
+  - manufacturer: Yamaha
+    model: Ténéré 700
+    market: US
+    years: [2021, 2021]
+    sources: [yamaha-om-lit-11626-34-01]

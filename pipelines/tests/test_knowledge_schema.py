@@ -19,7 +19,7 @@ VALID = dict(manufacturer="Yamaha", model="MT-07", market="EU", year_from=2021, 
 def test_schema_loads_and_is_json_serialisable():
     data = schema.load_schema()
     json.dumps(data)
-    assert data["schema_version"] == "1.0"
+    assert data["schema_version"] == "1.1"
     assert data["unknown_value"] == schema.UNKNOWN_VALUE
     assert set(data["units"]) >= {"distance", "volume", "pressure", "torque", "length", "time"}
     assert "N·m" in schema.allowed_units("torque")

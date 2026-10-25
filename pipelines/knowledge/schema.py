@@ -16,7 +16,7 @@ import frontmatter
 
 from ingest.normalize import slugify
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 # Written verbatim by the corpus wherever a value has no reliable source.
 UNKNOWN_VALUE = "not captured as an exact model-year value"
@@ -147,7 +147,9 @@ IDENTIFIER_RULES = {
     "model": "Non-empty display name; its slug (ingest.normalize.slugify) names the model directory.",
     "variant": f"Optional free text, at most {MAX_VARIANT_LENGTH} characters, containing at least one letter or digit.",
     "market": "Upper-case ISO-style code of 2-3 letters, for example EU or CA.",
-    "year_from/year_to": f"Integers between {MIN_YEAR} and {MAX_YEAR} with year_to >= year_from; the file is named <year_from>.md.",
+    "year_from/year_to": f"Integers between {MIN_YEAR} and {MAX_YEAR} with year_to >= year_from; the file is named"
+                         " <year_from>.md, or <year_from>-<market in lower case>.md when another market of the same"
+                         " model already uses <year_from>.md.",
 }
 
 
@@ -213,6 +215,14 @@ def load_schema() -> dict[str, Any]:
 _H2_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 
 
+def file_stems(meta: dict) -> set[str]:
+    """File names (without .md) allowed for this front matter: ``2021`` or, for a second market, ``2021-eu``."""
+    yf, market = meta.get("year_from"), meta.get("market")
+    if not isinstance(yf, int) or isinstance(yf, bool):
+        return set()
+    return {str(yf)} | ({f"{yf}-{market.lower()}"} if isinstance(market, str) and MARKET_RE.match(market) else set())
+
+
 def validate_file(path: Path) -> list[str]:
     """Validate one knowledge file. Reports missing frontmatter/sections, bad
     identifiers, year applicability that disagrees with the path, and duplicate
@@ -240,7 +250,7 @@ def validate_file(path: Path) -> list[str]:
             errors.append(f"model slug {slugify(meta['model'])!r} does not match directory {model_dir!r}")
         if isinstance(meta.get("manufacturer"), str) and slugify(meta["manufacturer"]) != manufacturer_dir:
             errors.append(f"manufacturer slug {slugify(meta['manufacturer'])!r} does not match directory {manufacturer_dir!r}")
-    if isinstance(meta.get("year_from"), int) and path.stem != str(meta["year_from"]):
+    if isinstance(meta.get("year_from"), int) and path.stem not in file_stems(meta):
         errors.append(f"file name {path.name!r} does not match year_from {meta['year_from']}")
 
     headings = _H2_RE.findall(post.content)
