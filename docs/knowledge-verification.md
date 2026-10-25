@@ -59,6 +59,25 @@ evidenced and technically verified. A generated file alone is not coverage.
    stated, and refuses a result that fails either layer. For an existing file, edit it by hand.
 4. Run `python -m knowledge.validate`, `python -m knowledge.technical` and `python -m knowledge.coverage`.
 
+## Reproducing the CI checks locally
+
+The pull request checks for the knowledge corpus are run from `pipelines/`:
+
+```bash
+cd pipelines && pip install -e ".[dev]"
+python -m knowledge.validate --baseline   # exit 1 on any error not in pipelines/knowledge/baseline.json
+python -m knowledge.coverage --check      # exit 1 when docs/knowledge-coverage.md is out of date
+```
+
+Neither command needs the database. To fix a failure, correct the knowledge file; for a stale report run
+`python -m knowledge.coverage` and commit the regenerated `docs/knowledge-coverage.md`. The baseline only
+ever shrinks: do not add entries to hide a new problem.
+
+The CI `pytest` step enforces the same two conditions on every pull request
+(`test_corpus_has_no_new_errors_beyond_baseline`, `test_committed_report_is_up_to_date`), and
+`test_committed_baseline_cli_passes_on_corpus` / `test_check_cli_passes_on_committed_report` run the commands above
+through their command-line entry points.
+
 ## Staging
 
 `knowledge/staging/motorcycles/` holds verified profiles that riders are not served yet; ingestion never

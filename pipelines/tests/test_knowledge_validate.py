@@ -202,3 +202,8 @@ def test_corpus_has_no_new_errors_beyond_baseline():
     assert findings, "validator found no files"
     fresh = new_errors(findings, validate.load_baseline(validate.DEFAULT_BASELINE))
     assert fresh == [], "\n" + validate.format_text(fresh)
+
+
+def test_committed_baseline_cli_passes_on_corpus(capsys):
+    """The exact invocation documented for CI: `python -m knowledge.validate --baseline`."""
+    assert main(["--baseline"]) == 0, capsys.readouterr().out
