@@ -55,3 +55,8 @@ def test_check_flag(tmp_path):
     assert coverage.main([*args, "--check"]) == 1
     assert coverage.main(args) == 0
     assert coverage.main([*args, "--check"]) == 0
+
+
+def test_check_cli_passes_on_committed_report(capsys):
+    """The exact invocation documented for CI: `python -m knowledge.coverage --check`."""
+    assert coverage.main(["--check"]) == 0, capsys.readouterr().err
