@@ -98,9 +98,7 @@ public class MaintenanceController {
         if (request.odometerKm() == null && request.performedAt() == null) {
             throw new BadRequestException("A maintenance event needs an odometer reading, a date, or both");
         }
-        if (request.odometerKm() != null && (request.odometerKm() < 0 || request.odometerKm() > 500_000)) {
-            throw new BadRequestException("Odometer reading is out of range");
-        }
+        GarageLimits.checkOdometer(request.odometerKm());
     }
 
     @GetMapping("/api/garage/vehicles/{id}/dashboard")
@@ -126,12 +124,16 @@ public class MaintenanceController {
         if (!java.util.Set.of("ROAD", "OFF_ROAD", "WET", "TRACK").contains(request.context())) {
             throw new BadRequestException("Unknown preference context: " + request.context());
         }
+        if (request.data() != null) {
+            GarageLimits.checkPreferenceKeyCount(request.data().size());
+        }
         String dataJson;
         try {
             dataJson = objectMapper.writeValueAsString(request.data());
         } catch (Exception e) {
             throw new BadRequestException("Invalid preference data");
         }
+        GarageLimits.checkPreferenceJson(dataJson);
         preferenceRepository.upsert(id, request.preferenceType(), request.context(), dataJson);
         return preferenceRepository.listForOwnedVehicle(currentUser.getUserId(), id);
     }

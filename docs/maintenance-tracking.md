@@ -45,6 +45,11 @@ visitor cookie.
   manufacturer reference data (`motorcycle_facts`). See "Facts vs.
   preferences" below.
 
+Input limits (`GarageLimits`, rejected with HTTP 400): nickname at most 60
+characters; odometer 0 to 500,000 km (vehicles and maintenance events share
+one constant); a preference payload at most 20 keys and 2,048 bytes of
+serialized JSON.
+
 ## How an event gets created
 
 Two paths, both landing in the same `maintenance_events` table:
